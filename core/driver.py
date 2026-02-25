@@ -33,6 +33,7 @@ class GSbotDriver(Node):
         self.target_z = self.config.neutral_z
         self.target_y = 0
         self.running = True
+        self.code_running = False
 
         self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
         self.create_subscription(String, '/mode_switch', self.mode_callback, 10)
@@ -48,6 +49,7 @@ class GSbotDriver(Node):
         self.flight_mode_pub = self.create_publisher(String, '/flight_mode', 10)
         self.msg_pub = self.create_publisher(String, '/status_info', 10)
         self.battery_pub = self.create_publisher(String, '/battery_status', 10)
+        self.code_status_pub = self.create_publisher(String, '/code_status', 10)
 
         self.latest_detections = []
         self.latest_markers = []
@@ -101,6 +103,7 @@ class GSbotDriver(Node):
             self.status_pub.publish(String(data="Connected" if self.is_tele_ok else "No Link"))
             self.arm_status_pub.publish(String(data="ARMED" if self.is_armed else "DISARMED"))
             self.mode_pub.publish(String(data=self.config.mode))
+            self.code_status_pub.publish(String(data="RUNNING" if self.code_running else "IDLE"))
 
     def arm_callback(self, msg):
         if msg.data.lower() == "arm": self.arm_vehicle(True)
@@ -155,12 +158,27 @@ class GSbotDriver(Node):
         self.latest_gesture = msg.data
 
     def execute_blockly_thread(self, msg):
-        code = msg.data
+        code = msg.data.strip()
         self.get_logger().info(f"Exec: {code}")
+        
+        # If it's just a halt command, stop immediately and don't start a new script thread
+        if code == "robot.halt()":
+            self.robot_interface.halt()
+            return
+
+        # New script execution: stop any previous script first
+        self.code_running = False
+        time.sleep(0.1) # Brief pause to allow old thread to catch the flag
+        
+        self.code_running = True
         threading.Thread(target=self._run_code, args=(code,), daemon=True).start()
 
     def _run_code(self, code):
-        try: exec(code, {'robot': self.robot_interface, 'time': time})
+        try: 
+            exec(code, {'robot': self.robot_interface, 'time': time})
         except Exception as e:
-            self.get_logger().error(f"Script Error: {e}")
+            if str(e) != "ROBOT_STOPPED":
+                self.get_logger().error(f"Script Error: {e}")
+        finally:
+            self.code_running = False
             self.set_movement(0, 0)

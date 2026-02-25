@@ -51,6 +51,7 @@ class FlaskRosNode(Node):
         self.latest_markers = []
         self.latest_gesture = "None"
         self.battery_status = {"percent": -1, "voltage": 0.0}
+        self.code_running = False
 
         if ROS_AVAILABLE:
             self.pub_mode = self.create_publisher(String, '/mode_switch', 10)
@@ -64,6 +65,7 @@ class FlaskRosNode(Node):
             self.create_subscription(String, '/flight_mode', self.flight_cb, 10)
             self.create_subscription(String, '/status_info', self.info_cb, 10)
             self.create_subscription(String, '/battery_status', self.battery_cb, 10)
+            self.create_subscription(String, '/code_status', self.code_cb, 10)
         else:
             self.pub_mode = MockPub()
             self.pub_arm = MockPub()
@@ -78,10 +80,9 @@ class FlaskRosNode(Node):
     def info_cb(self, msg): self.latest_msg = msg.data
     def battery_cb(self, msg):
         import json
-        try:
-            self.battery_status = json.loads(msg.data)
-        except:
-            pass
+        try: self.battery_status = json.loads(msg.data)
+        except: pass
+    def code_cb(self, msg): self.code_running = (msg.data == "RUNNING")
 
 if ROS_AVAILABLE:
     rclpy.init()
@@ -110,6 +111,7 @@ def system_status():
         "gesture": ros_node.latest_gesture,
         "status_msg": msg,
         "battery": ros_node.battery_status,
+        "code_running": ros_node.code_running,
         "ros_status": True if ROS_AVAILABLE else False
     })
 
