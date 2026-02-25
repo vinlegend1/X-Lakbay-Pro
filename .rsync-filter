@@ -1,0 +1,18 @@
+# Exclude Python cache and virtual environments
+- __pycache__/
+- *.pyc
+- venv/
+- .venv/
+- venv-ubuntu/
+
+# Exclude Version Control
+- .git/
+- .gitignore
+
+# Exclude OS-specific junk
+- .DS_Store
+- Thumbs.db
+
+# Exclude local model weights if they are already on the Pi
+- *.pt
+- *.engine

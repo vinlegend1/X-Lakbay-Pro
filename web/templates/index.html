@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>X Lakbay Pro</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}">
+    <style>
+        body {
+            padding-bottom: 70px;
+            background-color: #f0f2f5;
+            user-select: none;
+            overscroll-behavior: none;
+        }
+
+        /* 模式卡片样式 */
+        .mode-card {
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .mode-card:active {
+            transform: scale(0.95);
+        }
+
+        .mode-card.active {
+            border-color: #0d6efd;
+            background-color: #e9f2ff;
+            box-shadow: 0 0 15px rgba(13, 110, 253, 0.3);
+        }
+
+        /* 视图切换 */
+        .view-section {
+            display: none;
+            height: 100%;
+        }
+
+        .view-section.active {
+            display: block;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        /* Blockly 画布优化 */
+        #view-blockly {
+            position: relative;
+        }
+
+        #blocklyDiv {
+            height: 75vh;
+            width: 100%;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            background: white;
+            touch-action: none;
+        }
+
+        .blockly-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 900;
+            display: flex;
+            gap: 8px;
+        }
+
+        /* 底部导航 */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 70px;
+            background: white;
+            border-top: 1px solid #dee2e6;
+            z-index: 1050;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+
+        .nav-item {
+            text-align: center;
+            flex: 1;
+            padding: 10px;
+            cursor: pointer;
+            color: #6c757d;
+        }
+
+        .nav-item.active {
+            color: #0d6efd;
+            font-weight: bold;
+        }
+
+        .nav-item.disabled {
+            opacity: 0.3;
+            pointer-events: none;
+            filter: grayscale(100%);
+        }
+
+        .nav-icon {
+            font-size: 24px;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        /* Mobile UI Optimizations */
+        @media (max-width: 992px) {
+
+            /* 1. Thinner, auto-hiding scrollbars for Blockly */
+            .blocklyScrollbarHandle {
+                fill: #ccc !important;
+                fill-opacity: 0.5 !important;
+                stroke-width: 0 !important;
+            }
+
+            .blocklyScrollbarBackground {
+                display: none !important;
+            }
+
+            .blocklyScrollbarHorizontal .blocklyScrollbarHandle {
+                display: none;
+            }
+
+            .blocklyScrollbarVertical .blocklyScrollbarHandle {
+                display: none;
+            }
+
+            /* 2. Trashcan Overrides */
+            /* 2. Trashcan Overrides */
+            .blocklyTrashcan {
+                /* Force positioning to bottom-right of the workspace area */
+                bottom: 20px !important;
+                right: 20px !important;
+                top: auto !important;
+                left: auto !important;
+            }
+        }
+    </style>
+
+    <script src="{{ url_for('static', filename='js/jquery.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+
+    <script src="{{ url_for('static', filename='js/blockly_compressed.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/blocks_compressed.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/en.js') }}"></script>
+
+    <script src="{{ url_for('static', filename='js/python_compressed.js') }}"></script>
+
+    <script src="{{ url_for('static', filename='js/roslib.min.js') }}"></script>
+</head>
+
+<body>
+    <nav class="navbar navbar-dark bg-dark sticky-top">
+        <div class="container-fluid d-flex justify-content-between">
+            <a class="navbar-brand d-flex align-items-center gap-2" href="#">
+                <img src="{{ url_for('static', filename='logo.svg') }}" alt="Lakbay Logo" height="35"
+                    class="d-inline-block align-text-top">
+            </a>
+            <select class="form-select form-select-sm bg-dark text-white border-secondary me-auto" id="mode-dropdown"
+                onchange="switchMode(this.value)" default="none" style="width: auto;">
+                <option value="none" disabled selected>Select Mode</option>
+                <option value="UGV">🚗 UGV Mode</option>
+                <option value="USV">🚢 USV Mode</option>
+            </select>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-secondary" id="telemetry-badge">Telemetry: Checking...</span>
+                <span class="badge bg-secondary" id="battery-badge">Battery: N/A</span>
+                <button class="btn btn-sm btn-success" id="run-btn" onclick="runCode()" disabled>RUN</button>
+                <button class="btn btn-sm btn-danger" id="stop-btn" onclick="stopRobot()" disabled>STOP</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-3">
+
+        <div id="view-blockly" class="view-section active">
+            <div id="blocklyDiv"></div>
+        </div>
+
+        <div id="view-vision" class="view-section">
+            <h5 class="mb-3">Object Recognition</h5>
+            <div class="card bg-dark text-white overflow-hidden shadow-sm"
+                style="width: 100%; aspect-ratio: 1 / 1; position: relative;">
+                <!-- Camera Stream (YOLO) -->
+                <img id="yolo-feed" src="/video_feed/yolo" width="100%" height="100%"
+                    style="object-fit: contain; background: #000;">
+
+                <div style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;">
+                    <div id="vision-status" class="badge bg-danger m-3">VISION: DISABLED</div>
+                </div>
+            </div>
+
+            <div class="mt-3">
+                <h6>Detected Objects</h6>
+                <div id="object-list" class="list-group shadow-sm">
+                    <div class="list-group-item text-muted small text-center italic">Scanning for objects...</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-markers" class="view-section">
+            <h5 class="mb-3">ArUco Navigation</h5>
+            <div class="card bg-dark text-white overflow-hidden shadow-sm"
+                style="width: 100%; aspect-ratio: 1 / 1; position: relative;">
+                <!-- Camera Stream (ArUco) -->
+                <img id="aruco-feed" src="/video_feed/aruco" width="100%" height="100%"
+                    style="object-fit: contain; background: #000;">
+
+                <div style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;">
+                    <div id="marker-status" class="badge bg-secondary m-3">ARUCO: ACTIVE</div>
+                </div>
+            </div>
+
+            <div class="mt-3">
+                <h6>Detected Markers</h6>
+                <div id="marker-list" class="list-group shadow-sm">
+                    <div class="list-group-item text-muted small text-center italic">No markers focused...</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-gestures" class="view-section">
+            <h5 class="mb-3">✋ Hand Gesture Control</h5>
+            <div class="card bg-dark text-white overflow-hidden shadow-sm"
+                style="width: 100%; aspect-ratio: 1 / 1; position: relative;">
+                <img id="gesture-feed" src="" width="100%" height="100%" style="object-fit: contain; background: #000;">
+                <div style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;">
+                    <div id="gesture-status" class="badge bg-secondary m-3">GESTURE: INACTIVE</div>
+                </div>
+            </div>
+            <div class="mt-3">
+                <h6>Detected Gesture</h6>
+                <div class="list-group shadow-sm">
+                    <div class="list-group-item d-flex justify-content-between align-items-center"
+                        id="gesture-label-item">
+                        <span id="gesture-label-text">👋 Waiting for hand...</span>
+                        <span class="badge bg-info rounded-pill" id="gesture-badge">–</span>
+                    </div>
+                </div>
+                <div class="mt-2 small text-muted">
+                    <b>Supported gestures:</b> ✊ Fist · ☝️ Point · ✌️ Peace · 🖐 Open · 🤙 Call
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bottom-nav">
+        <div class="nav-item active" id="nav-blockly" onclick="changeView('blockly')"><span
+                class="nav-icon">🧩</span><small>Code</small></div>
+        <div class="nav-item disabled" id="nav-vision" onclick="changeView('vision')"><span
+                class="nav-icon">👁️</span><small>Vision</small></div>
+        <div class="nav-item disabled" id="nav-markers" onclick="changeView('markers')"><span
+                class="nav-icon">🏁</span><small>Markers</small></div>
+        <div class="nav-item disabled" id="nav-gestures" onclick="changeView('gestures')"><span
+                class="nav-icon">✋</span><small>Gestures</small></div>
+        <a class="nav-item disabled" id="nav-term" href="http://localhost:8080/"><span
+                class="nav-icon">>_</span><small>Terminal</small></a>
+    </div>
+
+    <script>
+        // --- Logic: UI & ROS ---
+        var isModeLocked = true;
+        var isArmed = false;
+
+        $(document).ready(function () {
+            setTimeout(function () {
+                if (isModeLocked) {
+                    showStatusToast("System Locked: Select a mode in the top menu to unlock controls", "dark");
+                }
+            }, 500);
+        });
+
+        function toggleArm() {
+            var cmd = isArmed ? 'robot.disarm()' : 'robot.arm()';
+            $('#arm-btn').prop('disabled', true).text('...');
+            cmdTopic.publish(new ROSLIB.Message({ data: cmd }));
+        }
+
+        function updateControlUI() {
+            $('#run-btn').prop('disabled', isModeLocked);
+            $('#stop-btn').prop('disabled', isModeLocked);
+        }
+
+        function switchMode(mode) {
+            if (!mode || mode === 'none') return;
+            isModeLocked = false;
+            $('#mode-dropdown').val(mode);
+            $('.nav-item').removeClass('disabled');
+            updateControlUI();
+            showStatusToast("System Unlocked: " + mode + " Mode", "success");
+            $.getJSON('/api/set_mode/' + mode);
+        }
+        function changeView(viewName) {
+            if (isModeLocked) return;
+            $('.nav-item').removeClass('active'); $('#nav-' + viewName).addClass('active');
+            $('.view-section').removeClass('active'); $('#view-' + viewName).addClass('active');
+            if (viewName === 'blockly') setTimeout(function () { window.dispatchEvent(new Event('resize')); }, 100);
+
+            // Update camera feeds based on active view
+            var yoloFeed = $('#yolo-feed');
+            var arucoFeed = $('#aruco-feed');
+            var gestureFeed = $('#gesture-feed');
+
+            yoloFeed.attr('src', '');
+            arucoFeed.attr('src', '');
+            gestureFeed.attr('src', '');
+
+            if (viewName === 'vision') {
+                yoloFeed.attr('src', '/video_feed/yolo');
+            } else if (viewName === 'markers') {
+                arucoFeed.attr('src', '/video_feed/aruco');
+            } else if (viewName === 'gestures') {
+                gestureFeed.attr('src', '/video_feed/gesture');
+                $('#gesture-status').removeClass('bg-secondary').addClass('bg-success').text('GESTURE: ACTIVE');
+            }
+        }
+
+        var ros = new ROSLIB.Ros({ url: 'ws://' + window.location.hostname + ':9090' });
+        var cmdTopic = new ROSLIB.Topic({ ros: ros, name: '/blockly_code', messageType: 'std_msgs/String' });
+
+        // Poll for actual Pixhawk hardware connection & Armed status
+        setInterval(function () {
+            $.getJSON('/api/status', function (data) {
+                // Telemetry Badge
+                var badge = $('#telemetry-badge');
+                if (data.hw_status === "Connected") {
+                    badge.removeClass('bg-secondary bg-danger').addClass('bg-success').text('Telemetry: OK');
+                } else {
+                    badge.removeClass('bg-secondary bg-success').addClass('bg-danger').text('Telemetry: ' + data.hw_status);
+                }
+
+                var battBadge = $('#battery-badge');
+                if (data.battery && data.battery.percent >= 0) {
+                    battBadge.text(`Battery: ${data.battery.percent}% (${data.battery.voltage}V)`);
+                    if (data.battery.percent < 20) {
+                        battBadge.removeClass('bg-success bg-secondary').addClass('bg-warning text-dark');
+                    } else {
+                        battBadge.removeClass('bg-warning bg-secondary text-dark').addClass('bg-success');
+                    }
+                } else {
+                    battBadge.removeClass('bg-success bg-warning text-dark').addClass('bg-secondary').text('Battery: N/A');
+                }
+
+                // If the backend profile changes, update our local selection UI
+                if (data.current_mode === "UGV" || data.current_mode === "USV") {
+                    if ($('#mode-dropdown').val() !== data.current_mode) {
+                        $('#mode-dropdown').val(data.current_mode);
+                    }
+                    if (isModeLocked) {
+                        isModeLocked = false;
+                        $('.nav-item').removeClass('disabled');
+                    }
+                }
+                // Vision / YOLO Detections
+                var objList = $('#object-list');
+                var visionStatus = $('#vision-status');
+
+                if (data.detections && data.detections.length > 0) {
+                    visionStatus.removeClass('bg-danger').addClass('bg-success').text('VISION: ACTIVE');
+                    objList.empty();
+                    data.detections.forEach(function (obj) {
+                        objList.append(`
+                            <div class="list-group-item d-flex justify-content-between align-items-center">
+                                <span>🔍 ${obj.label}</span>
+                                <span class="badge bg-primary rounded-pill">${obj.conf}%</span>
+                            </div>
+                        `);
+                    });
+                } else {
+                    visionStatus.removeClass('bg-success').addClass('bg-danger').text('VISION: NO OBJECTS');
+                    if (objList.children().length > 5 || objList.text().includes('Scanning')) {
+                        objList.html('<div class="list-group-item text-muted small text-center italic">Scanning for objects...</div>');
+                    }
+                }
+
+                // ArUco Markers
+                var markerList = $('#marker-list');
+                if (data.markers && data.markers.length > 0) {
+                    markerList.empty();
+                    data.markers.forEach(function (m) {
+                        markerList.append(`<div class="list-group-item">🆔 Marker ID: <b>${m.id}</b></div>`);
+                    });
+                    $('#marker-status').removeClass('bg-secondary').addClass('bg-success').text('ARUCO: DETECTED');
+                } else {
+                    $('#marker-status').removeClass('bg-success').addClass('bg-secondary').text('ARUCO: SCANNING');
+                    if (markerList.children().length > 3 || markerList.text().includes('No markers')) {
+                        markerList.html('<div class="list-group-item text-muted small text-center italic">No markers focused...</div>');
+                    }
+                }
+
+                // Gesture
+                if (data.gesture) {
+                    var label = data.gesture;
+                    $('#gesture-label-text').text(label);
+                    if (label === 'No Hand Detected') {
+                        $('#gesture-badge').removeClass('bg-success').addClass('bg-secondary').text('–');
+                    } else {
+                        $('#gesture-badge').removeClass('bg-secondary').addClass('bg-success').text('LIVE');
+                    }
+                }
+
+                // Controls Sync
+                updateControlUI();
+
+                // Show Alerts/Notifs from Pixhawk
+                if (data.status_msg && data.status_msg.length > 0) {
+                    showStatusToast(data.status_msg);
+                }
+            }).fail(function () {
+                $('#telemetry-badge').removeClass('bg-success bg-secondary').addClass('bg-danger').text('Server Offline');
+            });
+        }, 1000); // 1Hz poll for faster feedback
+
+        function showStatusToast(message, type = "dark") {
+            var icon = type === "success" ? "✅" : "⚠️";
+            var bgClass = type === "success" ? "bg-success" : "bg-dark";
+
+            // Create toast element
+            var toastHtml = `
+            <div class="toast-container position-fixed bottom-0 start-50 translate-middle-x p-3">
+                <div class="toast align-items-center text-white ${bgClass} border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true">
+                    <div class="d-flex">
+                        <div class="toast-body">${icon} ${message}</div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                </div>
+            </div>`;
+            var toastEl = $(toastHtml).appendTo('body');
+            var toast = new bootstrap.Toast(toastEl.find('.toast')[0], { delay: 4000 });
+            toast.show();
+            toastEl.on('hidden.bs.toast', function () { toastEl.remove(); });
+        }
+
+        // --- BLOCKLY CONFIGURATION ---
+        if (typeof Blockly !== 'undefined') {
+
+            // 1. Define Custom Blocks (GSbot) - REMOVED ARM BLOCK
+            // 注意：这里改成 python.pythonGenerator
+
+            Blockly.Blocks['ugv_arm'] = { init: function () { this.appendDummyInput().appendField("🟢 ARM"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(350); } };
+            python.pythonGenerator.forBlock['ugv_arm'] = function (block) { return 'robot.arm()\n'; };
+
+            Blockly.Blocks['ugv_disarm'] = { init: function () { this.appendDummyInput().appendField("🔴 DISARM"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(350); } };
+            python.pythonGenerator.forBlock['ugv_disarm'] = function (block) { return 'robot.disarm()\n'; };
+
+            Blockly.Blocks['ugv_move'] = { init: function () { this.appendDummyInput().appendField("🚗 Move").appendField(new Blockly.FieldNumber(0.5), "SPEED"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(160); } };
+            python.pythonGenerator.forBlock['ugv_move'] = function (block) { return 'robot.move_forward(' + block.getFieldValue('SPEED') + ')\n'; };
+
+            Blockly.Blocks['ugv_turn'] = { init: function () { this.appendDummyInput().appendField("🔄 Turn").appendField(new Blockly.FieldNumber(0.5), "SPEED"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(160); } };
+            python.pythonGenerator.forBlock['ugv_turn'] = function (block) { return 'robot.turn(' + block.getFieldValue('SPEED') + ')\n'; };
+
+            Blockly.Blocks['ugv_wait'] = { init: function () { this.appendDummyInput().appendField("⏳ Wait (s)").appendField(new Blockly.FieldNumber(1), "SEC"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(210); } };
+            python.pythonGenerator.forBlock['ugv_wait'] = function (block) { return 'time.sleep(' + block.getFieldValue('SEC') + ')\n'; };
+
+            Blockly.Blocks['ugv_stop'] = { init: function () { this.appendDummyInput().appendField("🛑 STOP"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(350); } };
+            python.pythonGenerator.forBlock['ugv_stop'] = function (block) { return 'robot.stop()\n'; };
+
+            // Vision Blocks
+            Blockly.Blocks['ugv_sees_object'] = {
+                init: function () {
+                    this.appendDummyInput()
+                        .appendField("👁️ Sees Object")
+                        .appendField(new Blockly.FieldDropdown([
+                            ["Person", "person"], ["Car", "car"], ["Dog", "dog"], ["Cat", "cat"],
+                            ["Bottle", "bottle"], ["Chair", "chair"], ["Stop Sign", "stop sign"]
+                        ]), "OBJ");
+                    this.setOutput(true, "Boolean");
+                    this.setColour(290);
+                }
+            };
+            python.pythonGenerator.forBlock['ugv_sees_object'] = function (block) {
+                var obj = block.getFieldValue('OBJ');
+                return ['robot.sees_object("' + obj + '")', python.pythonGenerator.ORDER_ATOMIC];
+            };
+
+            Blockly.Blocks['ugv_sees_object_custom'] = {
+                init: function () {
+                    this.appendValueInput("OBJ")
+                        .setCheck("String")
+                        .appendField("👁️ Sees Object (Text)");
+                    this.setOutput(true, "Boolean");
+                    this.setColour(290);
+                }
+            };
+            python.pythonGenerator.forBlock['ugv_sees_object_custom'] = function (block) {
+                var obj = python.pythonGenerator.valueToCode(block, 'OBJ', python.pythonGenerator.ORDER_ATOMIC) || '""';
+                return ['robot.sees_object(' + obj + ')', python.pythonGenerator.ORDER_ATOMIC];
+            };
+
+            Blockly.Blocks['ugv_sees_marker'] = {
+                init: function () {
+                    this.appendValueInput("MARKER_ID")
+                        .setCheck("Number")
+                        .appendField("🏁 Sees Marker ID");
+                    this.setOutput(true, "Boolean");
+                    this.setColour(290);
+                }
+            };
+            python.pythonGenerator.forBlock['ugv_sees_marker'] = function (block) {
+                var id = python.pythonGenerator.valueToCode(block, 'MARKER_ID', python.pythonGenerator.ORDER_ATOMIC) || '0';
+                return ['robot.sees_marker(' + id + ')', python.pythonGenerator.ORDER_ATOMIC];
+            };
+
+            Blockly.Blocks['ugv_sees_gesture'] = {
+                init: function () {
+                    this.appendDummyInput()
+                        .appendField("✋ Sees Gesture")
+                        .appendField(new Blockly.FieldDropdown([
+                            ["Open Palm (Open)", "Open_Palm"],
+                            ["Closed Fist (Fist)", "Closed_Fist"],
+                            ["Pointing Up (Point)", "Pointing_Up"],
+                            ["Thumb Up", "Thumb_Up"],
+                            ["Thumb Down", "Thumb_Down"],
+                            ["Victory (Peace)", "Victory"],
+                            ["Call (ILoveYou)", "ILoveYou"]
+                        ]), "GESTURE");
+                    this.setOutput(true, "Boolean");
+                    this.setColour(290);
+                }
+            };
+            python.pythonGenerator.forBlock['ugv_sees_gesture'] = function (block) {
+                var gesture = block.getFieldValue('GESTURE');
+                return ['robot.sees_gesture("' + gesture + '")', python.pythonGenerator.ORDER_ATOMIC];
+            };
+
+            // 2. Inject Toolbox (Expanded with Categories)
+            var isMobile = window.innerWidth < 992;
+            var workspace = Blockly.inject('blocklyDiv', {
+                toolbox: `
+                <xml>
+                    <category name="Servo" colour="0">
+                        <block type="ugv_arm"></block>
+                        <block type="ugv_disarm"></block>
+                        <block type="ugv_wait"></block>
+                        <block type="ugv_move"></block>
+                        <block type="ugv_turn"></block>
+                        <block type="ugv_stop"></block>
+                    </category>
+                    <category name="Vision" colour="290">
+                        <block type="ugv_sees_object"></block>
+                        <block type="ugv_sees_object_custom">
+                            <value name="OBJ">
+                                <shadow type="text">
+                                    <field name="TEXT">apple</field>
+                                </shadow>
+                            </value>
+                        </block>
+                        <block type="ugv_sees_marker">
+                            <value name="MARKER_ID">
+                                <shadow type="math_number">
+                                    <field name="NUM">1</field>
+                                </shadow>
+                            </value>
+                        </block>
+                        <block type="ugv_sees_gesture"></block>
+                    </category>
+                    <sep></sep>
+                    <category name="Logic" colour="210">
+                        <block type="controls_if"></block>
+                        <block type="logic_compare"></block>
+                        <block type="logic_operation"></block>
+                        <block type="logic_negate"></block>
+                        <block type="logic_boolean"></block>
+                    </category>
+                    <category name="Loops" colour="120">
+                        <block type="controls_repeat_ext">
+                            <value name="TIMES">
+                                <shadow type="math_number">
+                                    <field name="NUM">10</field>
+                                </shadow>
+                            </value>
+                        </block>
+                        <block type="controls_whileUntil"></block>
+                    </category>
+                    <category name="Math" colour="230">
+                        <block type="math_number"></block>
+                        <block type="math_arithmetic"></block>
+                        <block type="math_random_int">
+                            <value name="FROM"><shadow type="math_number"><field name="NUM">1</field></shadow></value>
+                            <value name="TO"><shadow type="math_number"><field name="NUM">100</field></shadow></value>
+                        </block>
+                    </category>
+                    <category name="Text" colour="160">
+                        <block type="text"></block>
+                    </category>
+                    <category name="Variables" colour="330" custom="VARIABLE"></category>
+                </xml>`,
+                zoom: { controls: !isMobile, wheel: true, startScale: isMobile ? 0.7 : 1.0, maxScale: 3, minScale: 0.3 },
+                trashcan: true,
+                horizontalLayout: isMobile,
+                toolboxPosition: isMobile ? 'start' : 'start', // Start preserves bottom-right for some layouts
+                scrollbars: true
+            });
+
+
+            // cmdTopic is now defined globally
+
+            window.runCode = function () {
+                // ★★★ Generate PYTHON code instead of JS ★★★
+                var code = python.pythonGenerator.workspaceToCode(workspace);
+                console.log("Generated Python:\n" + code); // Debug
+                cmdTopic.publish(new ROSLIB.Message({ data: code }));
+            };
+
+            window.stopRobot = function () { cmdTopic.publish(new ROSLIB.Message({ data: "robot.stop()" })); };
+        }
+    </script>
+</body>
+
+</html>
