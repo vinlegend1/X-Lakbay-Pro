@@ -5,33 +5,25 @@ import threading
 import time
 import json
 from rclpy.node import Node
-
 from utils.hardware_config import get_serial_config
 from core.interface import RobotInterface
 
-class VehicleConfig:
-    def __init__(self, mode, neutral_z, fwd_scale, rev_scale, turn_scale, deadzone):
-        self.mode = mode
-        self.neutral_z = neutral_z
-        self.fwd_scale = fwd_scale
-        self.rev_scale = rev_scale
-        self.turn_scale = turn_scale
-        self.deadzone = deadzone
-
-UGV_CONFIG = VehicleConfig("UGV", neutral_z=750, fwd_scale=500, rev_scale=500, turn_scale=1000, deadzone=10)
-USV_SAFE_DEFAULT = VehicleConfig("USV", neutral_z=1500, fwd_scale=300, rev_scale=300, turn_scale=500, deadzone=20)
+# Note: VehicleConfig and scaling logic removed in favor of direct raw control as requested.
 
 class GSbotDriver(Node):
     def __init__(self):
         super().__init__('gsbot_driver')
-        self.config = UGV_CONFIG
-        self.get_logger().info(f"⚙️ Active Profile: {self.config.mode}")
 
+        self.mode = "UGV"
         self.master = None
         self.connect_pixhawk()
 
-        self.target_z = self.config.neutral_z
+        # Control targets (0 is neutral)
+        self.target_x = 0
         self.target_y = 0
+        self.target_z = 0
+        self.target_r = 0
+
         self.running = True
         self.code_running = False
 
@@ -42,7 +34,7 @@ class GSbotDriver(Node):
         self.create_subscription(String, '/vision/detections', self.detections_callback, 10)
         self.create_subscription(String, '/vision/markers', self.markers_callback, 10)
         self.create_subscription(String, '/vision/gesture', self.gesture_callback, 10)
-        
+
         self.status_pub = self.create_publisher(String, '/tele_status', 10)
         self.arm_status_pub = self.create_publisher(String, '/armed_status', 10)
         self.mode_pub = self.create_publisher(String, '/current_mode', 10)
@@ -102,7 +94,7 @@ class GSbotDriver(Node):
             
             self.status_pub.publish(String(data="Connected" if self.is_tele_ok else "No Link"))
             self.arm_status_pub.publish(String(data="ARMED" if self.is_armed else "DISARMED"))
-            self.mode_pub.publish(String(data=self.config.mode))
+            self.mode_pub.publish(String(data=self.mode))
             self.code_status_pub.publish(String(data="RUNNING" if self.code_running else "IDLE"))
 
     def arm_callback(self, msg):
@@ -120,31 +112,29 @@ class GSbotDriver(Node):
             0, cmd, 0, 0, 0, 0, 0, 0
         )
 
-    def set_movement(self, linear, angular):
-        neutral = self.config.neutral_z
-        if linear > 0: pwm = int(neutral - (linear * self.config.fwd_scale))
-        else: pwm = int(neutral + (abs(linear) * self.config.rev_scale))
-        self.target_z = max(min(pwm, 1000), 0)
-        self.target_y = int(angular * self.config.turn_scale)
-
     def mavlink_loop(self):
         while self.running:
             if self.master:
                 try:
+                    # x, y, z, r mapping.
                     self.master.mav.manual_control_send(
-                        self.master.target_system, 0,
-                        int(self.target_y), int(self.target_z), int(self.target_y), 0
+                        self.master.target_system,
+                        int(self.target_x),
+                        int(self.target_y),
+                        int(self.target_z),
+                        int(self.target_r),
+                        0
                     )
-                except Exception: pass
+                except Exception:
+                    pass
             time.sleep(0.1)
 
     def cmd_vel_callback(self, msg):
-        self.set_movement(msg.linear.x, msg.angular.z)
+        pass
 
     def mode_callback(self, msg):
-        if msg.data == "UGV": self.config = UGV_CONFIG
-        elif msg.data == "USV": self.config = USV_SAFE_DEFAULT
-        self.target_z = self.config.neutral_z
+        self.mode = msg.data
+        self.mode_pub.publish(String(data=self.mode))
 
     def detections_callback(self, msg):
         try: self.latest_detections = json.loads(msg.data)
@@ -181,4 +171,8 @@ class GSbotDriver(Node):
                 self.get_logger().error(f"Script Error: {e}")
         finally:
             self.code_running = False
-            self.set_movement(0, 0)
+            # Reset all targets to 0
+            self.target_x = 0
+            self.target_y = 0
+            self.target_z = 0
+            self.target_r = 0

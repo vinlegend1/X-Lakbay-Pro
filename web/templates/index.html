@@ -431,9 +431,13 @@
                 <span id="tele-text">Link</span>
             </div>
 
-            <div class="navbar-status-text nav-batt" id="batt-status-cont">
+            <div class="navbar-status-text nav-batt d-flex align-items-center" id="batt-status-cont">
                 <i class="bi bi-battery-full me-1" style="font-size: 1.1rem;" id="batt-icon"></i>
                 <span id="batt-text">--%</span>
+                <button class="btn btn-outline-danger btn-sm ms-2 border-0 p-0 lh-1" onclick="confirmPoweroff()"
+                    title="Power Off">
+                    <i class="bi bi-power" style="font-size: 1.2rem;"></i>
+                </button>
             </div>
 
             <div class="d-none d-lg-block"></div> <!-- Spacer for grid -->
@@ -448,6 +452,16 @@
     <div class="container mt-3">
         <div class="desktop-split-container">
             <div id="view-blockly" class="view-section active">
+                <div class="blockly-controls">
+                    <button class="btn btn-sm btn-light border shadow-sm" onclick="saveWorkspace()"
+                        title="Save Workspace">
+                        <i class="bi bi-download"></i> Save
+                    </button>
+                    <button class="btn btn-sm btn-light border shadow-sm" onclick="loadWorkspace()"
+                        title="Load Workspace">
+                        <i class="bi bi-upload"></i> Load
+                    </button>
+                </div>
                 <div id="blocklyDiv"></div>
             </div>
 
@@ -543,6 +557,8 @@
                 </div>
             </div>
         </div>
+
+    </div>
     </div>
 
     <div class="bottom-nav">
@@ -611,6 +627,15 @@
             updateControlUI();
             showStatusToast("System Unlocked: " + mode + " Mode", "success");
             $.getJSON('/api/set_mode/' + mode);
+        }
+
+        function confirmPoweroff() {
+            if (confirm("Are you sure you want to SHUT DOWN the robot?")) {
+                showStatusToast("Shutting down...", "dark");
+                $.getJSON('/api/shutdown', function (data) {
+                    showStatusToast("System is powering off...", "success");
+                });
+            }
         }
         function changeView(viewName) {
             if (isModeLocked) return;
@@ -773,11 +798,32 @@
             Blockly.Blocks['ugv_disarm'] = { init: function () { this.appendDummyInput().appendField("🔴 DISARM"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(350); } };
             python.pythonGenerator.forBlock['ugv_disarm'] = function (block) { return 'robot.disarm()\n'; };
 
-            Blockly.Blocks['ugv_move'] = { init: function () { this.appendDummyInput().appendField("🚗 Move").appendField(new Blockly.FieldNumber(0.5), "SPEED"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(160); } };
-            python.pythonGenerator.forBlock['ugv_move'] = function (block) { return 'robot.move_forward(' + block.getFieldValue('SPEED') + ')\n'; };
-
-            Blockly.Blocks['ugv_turn'] = { init: function () { this.appendDummyInput().appendField("🔄 Turn").appendField(new Blockly.FieldNumber(0.5), "SPEED"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(160); } };
-            python.pythonGenerator.forBlock['ugv_turn'] = function (block) { return 'robot.turn(' + block.getFieldValue('SPEED') + ')\n'; };
+            Blockly.Blocks['ugv_move'] = {
+                init: function () {
+                    this.appendValueInput("X")
+                        .setCheck("Number")
+                        .appendField("🚗 Move X:");
+                    this.appendValueInput("Y")
+                        .setCheck("Number")
+                        .appendField("Y:");
+                    this.appendValueInput("Z")
+                        .setCheck("Number")
+                        .appendField("Z:");
+                    this.appendValueInput("R")
+                        .setCheck("Number")
+                        .appendField("R:");
+                    this.setPreviousStatement(true);
+                    this.setNextStatement(true);
+                    this.setColour(160);
+                }
+            };
+            python.pythonGenerator.forBlock['ugv_move'] = function (block) {
+                var x = python.pythonGenerator.valueToCode(block, 'X', python.pythonGenerator.ORDER_ATOMIC) || '0';
+                var y = python.pythonGenerator.valueToCode(block, 'Y', python.pythonGenerator.ORDER_ATOMIC) || '0';
+                var z = python.pythonGenerator.valueToCode(block, 'Z', python.pythonGenerator.ORDER_ATOMIC) || '0';
+                var r = python.pythonGenerator.valueToCode(block, 'R', python.pythonGenerator.ORDER_ATOMIC) || '0';
+                return `robot.move(${x}, ${y}, ${z}, ${r})\n`;
+            };
 
             Blockly.Blocks['ugv_wait'] = { init: function () { this.appendDummyInput().appendField("⏳ Wait (s)").appendField(new Blockly.FieldNumber(1), "SEC"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(210); } };
             python.pythonGenerator.forBlock['ugv_wait'] = function (block) { return 'time.sleep(' + block.getFieldValue('SEC') + ')\n'; };
@@ -903,8 +949,28 @@
                         <block type="ugv_arm"></block>
                         <block type="ugv_disarm"></block>
                         <block type="ugv_wait"></block>
-                        <block type="ugv_move"></block>
-                        <block type="ugv_turn"></block>
+                        <block type="ugv_move">
+                            <value name="X">
+                                <shadow type="math_number">
+                                    <field name="NUM">0</field>
+                                </shadow>
+                            </value>
+                            <value name="Y">
+                                <shadow type="math_number">
+                                    <field name="NUM">0</field>
+                                </shadow>
+                            </value>
+                            <value name="Z">
+                                <shadow type="math_number">
+                                    <field name="NUM">0</field>
+                                </shadow>
+                            </value>
+                            <value name="R">
+                                <shadow type="math_number">
+                                    <field name="NUM">0</field>
+                                </shadow>
+                            </value>
+                        </block>
                         <block type="ugv_stop"></block>
                     </category>
                     <category name="Vision" colour="290">
@@ -977,6 +1043,29 @@
 
             // cmdTopic is now defined globally
 
+            window.saveWorkspace = function () {
+                var xml = Blockly.Xml.workspaceToDom(workspace);
+                var xmlText = Blockly.Xml.domToText(xml);
+                localStorage.setItem('gsbot_workspace', xmlText);
+                showStatusToast("Workspace Saved locally!", "success");
+            };
+
+            window.loadWorkspace = function () {
+                var xmlText = localStorage.getItem('gsbot_workspace');
+                if (xmlText) {
+                    workspace.clear();
+                    // Modern Blockly uses Blockly.utils.xml.textToDom
+                    var xml = Blockly.utils.xml.textToDom(xmlText);
+                    Blockly.Xml.domToWorkspace(xml, workspace);
+                    showStatusToast("Workspace Loaded!", "success");
+                } else {
+                    showStatusToast("No saved workspace found.", "dark");
+                }
+            };
+
+            // Auto-load
+            setTimeout(loadWorkspace, 500);
+
             window.runCode = function () {
                 // ★★★ Generate PYTHON code instead of JS ★★★
                 var code = python.pythonGenerator.workspaceToCode(workspace);
@@ -1023,6 +1112,7 @@
                 $('#desktop-feed').attr('src', '/video_feed/yolo');
             }
         });
+
     </script>
 </body>
 

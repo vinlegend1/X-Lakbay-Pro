@@ -59,14 +59,15 @@ def main():
                     # Send this value repeatedly for 2 seconds to observe motor
                     # Pixhawk needs a stream of commands to stay active
                     for _ in range(20):
-                        master.mav.manual_control_send(
+                        # Map current_z (0-1000) to PWM (1000-2000) for Throttle (Ch3)
+                        pwm_throttle = int(current_z) + 1000
+                        master.mav.rc_channels_override_send(
                             master.target_system,
-                            0,      # Target Component
-                            0,      # Pitch (X)
-                            0,      # Roll (Y)
-                            int(current_z), # Throttle (Z) - THIS IS THE POWER
-                            0,      # Yaw (R)
-                            0       # Buttons
+                            master.target_component,
+                            1500,           # Ch1: Steering (Neutral)
+                            65535,          # Ch2
+                            pwm_throttle,   # Ch3: Throttle
+                            65535, 65535, 65535, 65535, 65535
                         )
                         time.sleep(0.1)
                 else:

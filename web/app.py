@@ -139,6 +139,25 @@ def gen_view(stream_type):
 def video_feed(stream_type):
     return app.response_class(gen_view(stream_type), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route('/api/shutdown')
+def shutdown():
+    import subprocess
+    print("🛑 Shutdown request received.")
+    if os.name != 'nt':
+        try:
+            # Using sudo -S to pipe the password
+            password = "123"
+            print("Executing: sudo -S poweroff")
+            process = subprocess.Popen(['sudo', '-S', 'poweroff'], stdin=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            process.communicate(input=password + '\n')
+            return jsonify({"status": "shutting down"})
+        except Exception as e:
+            print(f"❌ Shutdown failed: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+    else:
+        print("Windows detected, skipping actual poweroff.")
+        return jsonify({"status": "mock_shutdown"})
+
 if __name__ == '__main__':
     print(f"🚀 Server running at http://{get_ip_address()}:5000")
     app.run(host='0.0.0.0', port=5000, debug=False)

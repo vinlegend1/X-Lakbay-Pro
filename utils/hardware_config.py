@@ -15,7 +15,7 @@ def get_serial_config():
     
     if arch == 'x86_64':
         # Typical Laptop setup with a USB-to-Serial adapter
-        port = '/dev/ttyUSB0'
+        port = 'udpin:0.0.0.0:14551'
         baud = 57600
     elif 'aarch64' in arch or 'arm' in arch:
         # Typical Raspberry Pi 64-bit setup (Ubuntu 24.04)
