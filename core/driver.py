@@ -5,7 +5,9 @@ import threading
 import time
 import json
 from rclpy.node import Node
+import math
 from utils.hardware_config import get_serial_config
+from utils.control import PID, LowPassFilter
 from core.interface import RobotInterface
 
 # Note: VehicleConfig and scaling logic removed in favor of direct raw control as requested.
@@ -51,6 +53,13 @@ class GSbotDriver(Node):
         self.is_tele_ok = False
         self.is_armed = False
 
+        # PID & Filter for Straight Path Correction
+        self.current_yaw = 0.0
+        self.target_yaw = None
+        self.lpf_yaw = LowPassFilter(alpha=0.2)
+        # Tuning: These values may need adjustment based on vehicle responsiveness
+        self.pid_yaw = PID(kp=10.0, ki=0, kd=0, output_limit=1000)
+
         self.heartbeat_thread = threading.Thread(target=self.mavlink_loop, daemon=True)
         self.heartbeat_thread.start()
         
@@ -75,7 +84,9 @@ class GSbotDriver(Node):
                 if not msg:
                     break
                 mtype = msg.get_type()
-                if mtype == 'STATUSTEXT':
+                if mtype == 'ATTITUDE':
+                    self.current_yaw = self.lpf_yaw.apply(msg.yaw)
+                elif mtype == 'STATUSTEXT':
                     error_text = str(msg.text)
                     self.get_logger().warn(f"Pixhawk Msg: {error_text}")
                     self.msg_pub.publish(String(data=error_text))
@@ -116,18 +127,59 @@ class GSbotDriver(Node):
         while self.running:
             if self.master:
                 try:
-                    # x, y, z, r mapping.
+                    # 1. Update latest IMU/Attitude data for the PID
+                    msg = self.master.recv_match(type='ATTITUDE', blocking=False)
+                    if msg:
+                        self.current_yaw = self.lpf_yaw.apply(msg.yaw)
+
+                    # 2. Determine if we should apply PID Straight-Correction
+                    # Steering is target_y for UGV, target_z for USV
+                    # Throttle is target_z for UGV, target_y for USV
+                    is_steering = False
+                    if self.mode == "UGV":
+                        is_steering = (abs(self.target_y) > 0)
+                        is_moving = (abs(self.target_z) > 0)
+                    else:
+                        is_steering = (abs(self.target_z) > 0)
+                        is_moving = (abs(self.target_y) > 0)
+
+                    out_x, out_y, out_z, out_r = self.target_x, self.target_y, self.target_z, self.target_r
+
+                    if is_moving and not is_steering:
+                        # Start holding current heading if we weren't already
+                        if self.target_yaw is None:
+                            self.target_yaw = self.current_yaw
+                        
+                        # Calculate error and correct
+                        error = self.target_yaw - self.current_yaw
+                        # Normalize error to [-pi, pi]
+                        if error > math.pi: error -= 2 * math.pi
+                        if error < -math.pi: error += 2 * math.pi
+                        
+                        correction = self.pid_yaw.update(error)
+                        
+                        # Apply correction to the steering axis
+                        if self.mode == "UGV":
+                            out_y = -correction # UGV Steering is Y
+                        else:
+                            out_z = correction # USV Steering is Z
+                    else:
+                        # Reset PID when steering or stopped
+                        self.target_yaw = None
+                        self.pid_yaw.reset_integral()
+
+                    # 3. Send Manual Control
                     self.master.mav.manual_control_send(
                         self.master.target_system,
-                        int(self.target_x),
-                        int(self.target_y),
-                        int(self.target_z),
-                        int(self.target_r),
+                        int(out_x),
+                        int(out_y),
+                        int(out_z),
+                        int(out_r),
                         0
                     )
-                except Exception:
-                    pass
-            time.sleep(0.1)
+                except Exception as e:
+                    self.get_logger().debug(f"MAVLink Loop Error: {e}")
+            time.sleep(0.05) # Increased frequency for smoother PID (20Hz)
 
     def cmd_vel_callback(self, msg):
         pass

@@ -481,6 +481,9 @@
                     <button class="model-btn" id="btn-desktop-gesture" onclick="setDesktopModel('gesture')">
                         <i class="bi bi-hand-index-thumb"></i> Gestures
                     </button>
+                    <button class="model-btn" id="btn-desktop-calibration" onclick="setDesktopModel('calibration')">
+                        <i class="bi bi-camera"></i> Calibration
+                    </button>
                 </div>
 
                 <div class="desktop-stream-cont">
@@ -492,6 +495,33 @@
                     <div class="d-flex justify-content-between mb-2">
                         <span>Environment Monitoring:</span>
                         <span id="desktop-vision-status" class="text-success">ACTIVE</span>
+                    </div>
+
+                    <!-- Desktop Calibration Controls (Hidden by default) -->
+                    <div id="desktop-calib-controls" style="display: none;">
+                        <hr class="border-secondary">
+                        <div class="d-flex gap-2 mb-3">
+                            <button class="btn btn-sm btn-primary flex-grow-1" onclick="captureCalibSample()">
+                                <i class="bi bi-camera-fill"></i> Capture
+                            </button>
+                            <button class="btn btn-sm btn-success" onclick="runCalibration()">
+                                <i class="bi bi-calculator"></i> Calibrate
+                            </button>
+                        </div>
+                        <div class="mb-2 d-flex justify-content-between">
+                            <span>Progress:</span>
+                            <span id="desktop-calib-count" class="badge bg-primary">0 Samples</span>
+                        </div>
+                        <div class="progress mb-3" style="height: 6px;">
+                            <div id="desktop-calib-progress" class="progress-bar bg-success" style="width: 0%"></div>
+                        </div>
+                        <p class="text-info mb-1 fw-bold">Calibration Guide:</p>
+                        <ul class="ps-3 mb-0" style="font-size: 0.75rem;">
+                            <li>Use <b>10x7 checkerboard</b> (9x6 corners).</li>
+                            <li>Wait for <b>green dots</b> to appear.</li>
+                            <li>Take <b>10+ samples</b> from various angles.</li>
+                            <li>Cover <b>edges and corners</b> for better result.</li>
+                        </ul>
                     </div>
                 </div>
             </div>
@@ -558,6 +588,52 @@
             </div>
         </div>
 
+        <div id="view-calibration" class="view-section d-lg-none">
+            <h5 class="mb-3">📷 Camera Calibration</h5>
+            <div class="card bg-dark text-white overflow-hidden shadow-sm"
+                style="width: 100%; aspect-ratio: 1 / 1; position: relative;">
+                <img id="calibration-feed" src="" width="100%" height="100%"
+                    style="object-fit: contain; background: #000;">
+                <div style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;">
+                    <div id="calibration-status-badge" class="badge bg-secondary m-3">CALIB: INACTIVE</div>
+                </div>
+            </div>
+            <div class="mt-3">
+                <div class="d-flex gap-2 mb-3">
+                    <button class="btn btn-primary flex-grow-1" onclick="captureCalibSample()">
+                        <i class="bi bi-camera-fill"></i> Capture
+                    </button>
+                    <button class="btn btn-success" onclick="runCalibration()">
+                        <i class="bi bi-calculator"></i> Calibrate
+                    </button>
+                    <button class="btn btn-outline-danger" onclick="resetCalibration()">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+                <div class="card bg-white p-3 shadow-sm border-0 rounded-4">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fw-bold">Calibration Progress</span>
+                        <span id="calib-count-text" class="badge bg-primary">0 Samples</span>
+                    </div>
+                    <div class="progress" style="height: 10px;">
+                        <div id="calib-progress-bar"
+                            class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                            role="progressbar" style="width: 0%"></div>
+                    </div>
+                    <div class="mt-3 small border-top pt-2">
+                        <p class="mb-1 text-primary fw-bold"><i class="bi bi-info-circle"></i> Instructions:</p>
+                        <ol class="ps-3 mb-0 text-muted">
+                            <li>Use a <b>10x7 square</b> checkerboard (yielding 9x6 internal corners).</li>
+                            <li>Move the board until it is fully detected (green dots appear).</li>
+                            <li><b>Capture</b> at least 10 samples from different distances and angles.</li>
+                            <li>Ensure the board covers the corners and edges of the frame.</li>
+                            <li>Click <b>Calibrate</b> to calculate and save camera parameters.</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
     </div>
 
@@ -573,6 +649,9 @@
         </div>
         <div class="nav-item disabled" id="nav-gestures" onclick="changeView('gestures')">
             <i class="bi bi-hand-index-thumb nav-icon"></i><small>Gestures</small>
+        </div>
+        <div class="nav-item disabled" id="nav-calibration" onclick="changeView('calibration')">
+            <i class="bi bi-camera nav-icon"></i><small>Calibration</small>
         </div>
     </div>
 
@@ -665,6 +744,9 @@
             } else if (viewName === 'gestures') {
                 gestureFeed.attr('src', '/video_feed/gesture');
                 $('#gesture-status').removeClass('bg-secondary').addClass('bg-success').text('GESTURE: ACTIVE');
+            } else if (viewName === 'calibration') {
+                $('#calibration-feed').attr('src', '/video_feed/calibration');
+                $('#calibration-status-badge').removeClass('bg-secondary').addClass('bg-success').text('CALIB: ACTIVE');
             }
         }
 
@@ -786,6 +868,48 @@
             toastEl.on('hidden.bs.toast', function () { toastEl.remove(); });
         }
 
+        function captureCalibSample() {
+            $.getJSON('/api/calibration/capture', function (data) {
+                if (data.status === 'success') {
+                    showStatusToast(data.message, "success");
+                    var countMatch = data.message.match(/\d+/);
+                    if (countMatch) {
+                        var count = parseInt(countMatch[0]);
+                        $('#calib-count-text').text(count + ' Samples');
+                        $('#desktop-calib-count').text(count + ' Samples');
+                        var progress = Math.min((count / 10) * 100, 100);
+                        $('#calib-progress-bar').css('width', progress + '%');
+                        $('#desktop-calib-progress').css('width', progress + '%');
+                    }
+                } else {
+                    showStatusToast(data.message, "dark");
+                }
+            });
+        }
+
+        function runCalibration() {
+            showStatusToast("Calculating camera matrix...", "dark");
+            $.getJSON('/api/calibration/calculate', function (data) {
+                if (data.status === 'success') {
+                    showStatusToast("Success: " + data.message, "success");
+                } else {
+                    showStatusToast("Error: " + data.message, "dark");
+                }
+            });
+        }
+
+        function resetCalibration() {
+            if (confirm("Reset calibration? All samples will be deleted.")) {
+                $.getJSON('/api/calibration/reset', function (data) {
+                    showStatusToast("Reset complete", "dark");
+                    $('#calib-count-text').text('0 Samples');
+                    $('#desktop-calib-count').text('0 Samples');
+                    $('#calib-progress-bar').css('width', '0%');
+                    $('#desktop-calib-progress').css('width', '0%');
+                });
+            }
+        }
+
         // --- BLOCKLY CONFIGURATION ---
         if (typeof Blockly !== 'undefined') {
 
@@ -798,23 +922,51 @@
             Blockly.Blocks['ugv_disarm'] = { init: function () { this.appendDummyInput().appendField("🔴 DISARM"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(350); } };
             python.pythonGenerator.forBlock['ugv_disarm'] = function (block) { return 'robot.disarm()\n'; };
 
-            Blockly.Blocks['ugv_move'] = {
+            Blockly.Blocks['ugv_move_direction'] = {
                 init: function () {
-                    this.appendValueInput("X")
+                    this.appendValueInput("SPEED")
                         .setCheck("Number")
-                        .appendField("🚗 Move X:");
-                    this.appendValueInput("Y")
-                        .setCheck("Number")
-                        .appendField("Y:");
-                    this.appendValueInput("Z")
-                        .setCheck("Number")
-                        .appendField("Z:");
-                    this.appendValueInput("R")
-                        .setCheck("Number")
-                        .appendField("R:");
+                        .appendField("🚀 MOVE")
+                        .appendField(new Blockly.FieldDropdown([["FORWARD", "FORWARD"], ["BACKWARD", "BACKWARD"]]), "DIR");
                     this.setPreviousStatement(true);
                     this.setNextStatement(true);
                     this.setColour(160);
+                }
+            };
+            python.pythonGenerator.forBlock['ugv_move_direction'] = function (block) {
+                var dir = block.getFieldValue('DIR');
+                var speed = python.pythonGenerator.valueToCode(block, 'SPEED', python.pythonGenerator.ORDER_ATOMIC) || '50';
+                return (dir === 'FORWARD' ? 'robot.forward(' : 'robot.backward(') + speed + ')\n';
+            };
+
+            Blockly.Blocks['ugv_turn_direction'] = {
+                init: function () {
+                    this.appendValueInput("SPEED")
+                        .setCheck("Number")
+                        .appendField("🔄 TURN")
+                        .appendField(new Blockly.FieldDropdown([["LEFT", "LEFT"], ["RIGHT", "RIGHT"]]), "DIR");
+                    this.setPreviousStatement(true);
+                    this.setNextStatement(true);
+                    this.setColour(160);
+                }
+            };
+            python.pythonGenerator.forBlock['ugv_turn_direction'] = function (block) {
+                var dir = block.getFieldValue('DIR');
+                var speed = python.pythonGenerator.valueToCode(block, 'SPEED', python.pythonGenerator.ORDER_ATOMIC) || '50';
+                return (dir === 'LEFT' ? 'robot.left(' : 'robot.right(') + speed + ')\n';
+            };
+
+            // Raw Move (Keep for advanced users but rename)
+            Blockly.Blocks['ugv_move'] = {
+                init: function () {
+                    this.appendValueInput("X").setCheck("Number").appendField("Raw Move X:");
+                    this.appendValueInput("Y").setCheck("Number").appendField("Y:");
+                    this.appendValueInput("Z").setCheck("Number").appendField("Z:");
+                    this.appendValueInput("R").setCheck("Number").appendField("R:");
+                    this.setPreviousStatement(true);
+                    this.setNextStatement(true);
+                    this.setColour(180);
+                    this.setTooltip("Direct MAVLink manual_control axis mapping");
                 }
             };
             python.pythonGenerator.forBlock['ugv_move'] = function (block) {
@@ -945,33 +1097,25 @@
             var workspace = Blockly.inject('blocklyDiv', {
                 toolbox: `
                 <xml>
-                    <category name="Servo" colour="0">
-                        <block type="ugv_arm"></block>
-                        <block type="ugv_disarm"></block>
-                        <block type="ugv_wait"></block>
-                        <block type="ugv_move">
-                            <value name="X">
-                                <shadow type="math_number">
-                                    <field name="NUM">0</field>
-                                </shadow>
-                            </value>
-                            <value name="Y">
-                                <shadow type="math_number">
-                                    <field name="NUM">0</field>
-                                </shadow>
-                            </value>
-                            <value name="Z">
-                                <shadow type="math_number">
-                                    <field name="NUM">0</field>
-                                </shadow>
-                            </value>
-                            <value name="R">
-                                <shadow type="math_number">
-                                    <field name="NUM">0</field>
-                                </shadow>
-                            </value>
+                    <category name="Servo" colour="350">
+                        <block type="ugv_move_direction">
+                            <value name="SPEED"><shadow type="math_number"><field name="NUM">50</field></shadow></value>
+                        </block>
+                        <block type="ugv_turn_direction">
+                            <value name="SPEED"><shadow type="math_number"><field name="NUM">50</field></shadow></value>
                         </block>
                         <block type="ugv_stop"></block>
+                        <block type="ugv_wait"></block>
+                        <block type="ugv_arm"></block>
+                        <block type="ugv_disarm"></block>
+                    </category>
+                    <category name="Advanced" colour="180">
+                        <block type="ugv_move">
+                            <value name="X"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+                            <value name="Y"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+                            <value name="Z"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+                            <value name="R"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+                        </block>
                     </category>
                     <category name="Vision" colour="290">
                         <block type="ugv_sees_object"></block>
@@ -1103,6 +1247,13 @@
             $('.model-btn').removeClass('active');
             $(`.model-btn[onclick*="${model}"]`).addClass('active');
             $('#desktop-feed').attr('src', '/video_feed/' + model);
+
+            // Toggle calibration controls
+            if (model === 'calibration') {
+                $('#desktop-calib-controls').slideDown();
+            } else {
+                $('#desktop-calib-controls').slideUp();
+            }
         }
 
         // Initialize desktop view

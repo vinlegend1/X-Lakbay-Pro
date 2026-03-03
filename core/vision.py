@@ -1,4 +1,5 @@
 import cv2
+import numpy as np
 import time
 import json
 import threading
@@ -34,6 +35,17 @@ class VisionSystem:
         self.yolo_frame = None
         self.aruco_frame = None
         self.gesture_frame = None
+        self.calibration_frame = None
+        self.calibrating = False
+        self.calib_samples_count = 0
+        self.calib_grid = (9, 6) # Standard checkerboard grid
+        self.objpoints = [] # 3d point in real world space
+        self.imgpoints = [] # 2d points in image plane
+        self.objp = np.zeros((self.calib_grid[0] * self.calib_grid[1], 3), np.float32)
+        self.objp[:, :2] = np.mgrid[0:self.calib_grid[0], 0:self.calib_grid[1]].T.reshape(-1, 2)
+        
+        self.latest_calib_corners = None
+        
         self.lock = threading.Lock()
         
         if self.camera:
@@ -41,6 +53,7 @@ class VisionSystem:
             threading.Thread(target=self._yolo_loop, daemon=True).start()
             threading.Thread(target=self._aruco_loop, daemon=True).start()
             threading.Thread(target=self._gesture_loop, daemon=True).start()
+            threading.Thread(target=self._calibration_loop, daemon=True).start()
 
     def _capture_loop(self):
         while self.camera.isOpened():
@@ -58,7 +71,7 @@ class VisionSystem:
                 self.yolo_frame = results[0].plot()
                 detections = [{"label": vision_model.names[int(box.cls[0])], 
                                "conf": round(float(box.conf[0]) * 100, 1)} 
-                              for r in results for box in r.boxes]
+                               for r in results for box in r.boxes]
                 self.ros_node.latest_detections = detections
                 self.ros_node.pub_detections.publish(String(data=json.dumps([d['label'] for d in detections])))
             time.sleep(0.01)
@@ -102,3 +115,65 @@ class VisionSystem:
                 cv2.putText(gesture_viz, label, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 120), 3)
                 self.gesture_frame = gesture_viz
             time.sleep(0.05)
+
+    def _calibration_loop(self):
+        while True:
+            if self.latest_frame is not None:
+                calib_viz = self.latest_frame.copy()
+                gray = cv2.cvtColor(calib_viz, cv2.COLOR_BGR2GRAY)
+                ret, corners = cv2.findChessboardCorners(gray, self.calib_grid, None)
+                
+                if ret:
+                    self.latest_calib_corners = corners
+                    cv2.drawChessboardCorners(calib_viz, self.calib_grid, corners, ret)
+                    cv2.putText(calib_viz, "Checkerboard Detected", (10, 40), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                else:
+                    self.latest_calib_corners = None
+                    cv2.putText(calib_viz, "Searching for Checkerboard...", (10, 40), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                
+                cv2.putText(calib_viz, f"Samples: {self.calib_samples_count}", (10, 70), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                self.calibration_frame = calib_viz
+            time.sleep(0.1)
+
+    def capture_sample(self):
+        if self.latest_calib_corners is not None:
+            self.objpoints.append(self.objp)
+            self.imgpoints.append(self.latest_calib_corners)
+            self.calib_samples_count += 1
+            return True, f"Sample {self.calib_samples_count} captured"
+        return False, "No checkerboard detected"
+
+    def reset_calibration(self):
+        self.objpoints = []
+        self.imgpoints = []
+        self.calib_samples_count = 0
+        return True, "Calibration reset"
+
+    def run_calibration(self):
+        if self.calib_samples_count < 10:
+            return False, f"Need at least 10 samples (currently {self.calib_samples_count})"
+        
+        try:
+            gray = cv2.cvtColor(self.latest_frame, cv2.COLOR_BGR2GRAY)
+            ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
+                self.objpoints, self.imgpoints, gray.shape[::-1], None, None
+            )
+            
+            if ret:
+                calib_data = {
+                    "camera_matrix": mtx.tolist(),
+                    "dist_coeff": dist.tolist(),
+                    "samples": self.calib_samples_count,
+                    "date": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                save_path = os.path.join(MODEL_DIR, 'camera_params.json')
+                with open(save_path, 'w') as f:
+                    json.dump(calib_data, f)
+                return True, f"Calibration successful! Saved to {save_path}"
+            else:
+                return False, "Calibration failed"
+        except Exception as e:
+            return False, f"Error: {str(e)}"

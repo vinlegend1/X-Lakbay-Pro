@@ -126,6 +126,7 @@ def gen_view(stream_type):
         if stream_type == 'yolo': frame = vision_sys.yolo_frame
         elif stream_type == 'gesture': frame = vision_sys.gesture_frame
         elif stream_type == 'aruco': frame = vision_sys.aruco_frame
+        elif stream_type == 'calibration': frame = vision_sys.calibration_frame
         
         if frame is None:
             time.sleep(0.1)
@@ -138,6 +139,21 @@ def gen_view(stream_type):
 @app.route('/video_feed/<stream_type>')
 def video_feed(stream_type):
     return app.response_class(gen_view(stream_type), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/api/calibration/capture')
+def calibrate_capture():
+    success, message = vision_sys.capture_sample()
+    return jsonify({"status": "success" if success else "error", "message": message})
+
+@app.route('/api/calibration/calculate')
+def calibrate_calculate():
+    success, message = vision_sys.run_calibration()
+    return jsonify({"status": "success" if success else "error", "message": message})
+
+@app.route('/api/calibration/reset')
+def calibrate_reset():
+    success, message = vision_sys.reset_calibration()
+    return jsonify({"status": "success" if success else "error", "message": message})
 
 @app.route('/api/shutdown')
 def shutdown():
