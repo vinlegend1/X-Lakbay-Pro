@@ -28,6 +28,7 @@ class GSbotDriver(Node):
 
         self.running = True
         self.code_running = False
+        self.current_script_id = 0
 
         self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
         self.create_subscription(String, '/mode_switch', self.mode_callback, 10)
@@ -49,16 +50,19 @@ class GSbotDriver(Node):
         self.latest_markers = []
         self.latest_gesture = "None"
 
-        self.robot_interface = RobotInterface(self)
+        # Robot interface session management
+        self.current_script_id = 0
         self.is_tele_ok = False
         self.is_armed = False
+        self.last_heartbeat_time = 0
+        self.pid_enabled = True
 
         # PID & Filter for Straight Path Correction
         self.current_yaw = 0.0
         self.target_yaw = None
         self.lpf_yaw = LowPassFilter(alpha=0.2)
         # Tuning: These values may need adjustment based on vehicle responsiveness
-        self.pid_yaw = PID(kp=10.0, ki=0, kd=0, output_limit=1000)
+        self.pid_yaw = PID(kp=50.0, ki=10, kd=0, output_limit=1000)
 
         self.heartbeat_thread = threading.Thread(target=self.mavlink_loop, daemon=True)
         self.heartbeat_thread.start()
@@ -72,6 +76,7 @@ class GSbotDriver(Node):
             self.master = mavutil.mavlink_connection(port, baud=baud)
             self.master.wait_heartbeat(timeout=2)
             self.is_tele_ok = True
+            self.last_heartbeat_time = time.time()
             self.get_logger().info(f"✅ Pixhawk Initialized on {port}!")
         except Exception:
             self.get_logger().error(f"❌ Pixhawk NOT detected on {port}.")
@@ -92,6 +97,7 @@ class GSbotDriver(Node):
                     self.msg_pub.publish(String(data=error_text))
                 elif mtype == 'HEARTBEAT':
                     self.is_tele_ok = True
+                    self.last_heartbeat_time = time.time()
                     self.is_armed = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
                     try:
                         flight_mode = self.master.flightmode
@@ -103,10 +109,14 @@ class GSbotDriver(Node):
                     batt_pct = getattr(msg, 'battery_remaining', -1)
                     self.battery_pub.publish(String(data=json.dumps({"percent": batt_pct, "voltage": batt_volts})))
             
-            self.status_pub.publish(String(data="Connected" if self.is_tele_ok else "No Link"))
-            self.arm_status_pub.publish(String(data="ARMED" if self.is_armed else "DISARMED"))
-            self.mode_pub.publish(String(data=self.mode))
-            self.code_status_pub.publish(String(data="RUNNING" if self.code_running else "IDLE"))
+            # Heartbeat Timeout Check (3 seconds)
+            if time.time() - self.last_heartbeat_time > 3.0:
+                self.is_tele_ok = False
+
+        self.status_pub.publish(String(data="Connected" if self.is_tele_ok else "No Link"))
+        self.arm_status_pub.publish(String(data="ARMED" if self.is_armed else "DISARMED"))
+        self.mode_pub.publish(String(data=self.mode))
+        self.code_status_pub.publish(String(data="RUNNING" if self.code_running else "IDLE"))
 
     def arm_callback(self, msg):
         if msg.data.lower() == "arm": self.arm_vehicle(True)
@@ -145,7 +155,7 @@ class GSbotDriver(Node):
 
                     out_x, out_y, out_z, out_r = self.target_x, self.target_y, self.target_z, self.target_r
 
-                    if is_moving and not is_steering:
+                    if self.pid_enabled and is_moving and not is_steering:
                         # Start holding current heading if we weren't already
                         if self.target_yaw is None:
                             self.target_yaw = self.current_yaw
@@ -157,6 +167,11 @@ class GSbotDriver(Node):
                         if error < -math.pi: error += 2 * math.pi
                         
                         correction = self.pid_yaw.update(error)
+
+                        # Apply Magnitude Floor (Minimum of 50 - reduced for smoothness)
+                        if abs(correction) > 0.001: 
+                            if abs(correction) < 50:
+                                correction = math.copysign(50, correction)
                         
                         # Apply correction to the steering axis
                         if self.mode == "UGV":
@@ -167,6 +182,8 @@ class GSbotDriver(Node):
                         # Reset PID when steering or stopped
                         self.target_yaw = None
                         self.pid_yaw.reset_integral()
+                    
+                    # self.get_logger().info(f"OUT: x={int(out_x)}, y={int(out_y)}, z={int(out_z)}, r={int(out_r)} | Yaw: {self.current_yaw:.2f}")
 
                     # 3. Send Manual Control
                     self.master.mav.manual_control_send(
@@ -193,7 +210,7 @@ class GSbotDriver(Node):
         except: pass
 
     def markers_callback(self, msg):
-        try: self.latest_markers = [int(x) for x in json.loads(msg.data)]
+        try: self.latest_markers = json.loads(msg.data)
         except: pass
 
     def gesture_callback(self, msg):
@@ -203,26 +220,36 @@ class GSbotDriver(Node):
         code = msg.data.strip()
         self.get_logger().info(f"Exec: {code}")
         
-        # If it's just a halt command, stop immediately and don't start a new script thread
+        # If it's just a halt command, stop immediately
         if code == "robot.halt()":
-            self.robot_interface.halt()
+            self.code_running = False
+            self.target_x = 0
+            self.target_y = 0
+            self.target_z = 0
+            self.target_r = 0
             return
 
         # New script execution: stop any previous script first
         self.code_running = False
-        time.sleep(0.1) # Brief pause to allow old thread to catch the flag
+        self.current_script_id += 1
+        script_id = self.current_script_id
+        time.sleep(0.05) 
         
         self.code_running = True
-        threading.Thread(target=self._run_code, args=(code,), daemon=True).start()
+        threading.Thread(target=self._run_code, args=(code, script_id), daemon=True).start()
 
-    def _run_code(self, code):
+    def _run_code(self, code, script_id):
         try: 
-            exec(code, {'robot': self.robot_interface, 'time': time})
+            # Create a localized robot interface for this specific session
+            local_robot = RobotInterface(self, script_id)
+            self.pid_enabled = True
+            exec(code, {'robot': local_robot, 'time': time, 'print': local_robot.log})
         except Exception as e:
             if str(e) != "ROBOT_STOPPED":
                 self.get_logger().error(f"Script Error: {e}")
         finally:
-            self.code_running = False
+            if self.current_script_id == script_id:
+                self.code_running = False
             # Reset all targets to 0
             self.target_x = 0
             self.target_y = 0

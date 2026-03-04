@@ -17,6 +17,8 @@ aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 aruco_params = cv2.aruco.DetectorParameters()
 aruco_detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
 
+MARKER_SIZE = 0.15 # 15 cm (0.15 meters)
+
 base_options = python.BaseOptions(model_asset_path=os.path.join(MODEL_DIR, 'gesture_recognizer.task'))
 gesture_options = mp_vision.GestureRecognizerOptions(base_options=base_options)
 recognizer = mp_vision.GestureRecognizer.create_from_options(gesture_options)
@@ -38,7 +40,7 @@ class VisionSystem:
         self.calibration_frame = None
         self.calibrating = False
         self.calib_samples_count = 0
-        self.calib_grid = (9, 6) # Standard checkerboard grid
+        self.calib_grid = (8, 6) # Standard checkerboard grid
         self.objpoints = [] # 3d point in real world space
         self.imgpoints = [] # 2d points in image plane
         self.objp = np.zeros((self.calib_grid[0] * self.calib_grid[1], 3), np.float32)
@@ -46,7 +48,23 @@ class VisionSystem:
         
         self.latest_calib_corners = None
         
+        self.camera_matrix = None
+        self.dist_coeffs = None
+        self._load_camera_params()
+        
         self.lock = threading.Lock()
+
+    def _load_camera_params(self):
+        params_path = os.path.join(MODEL_DIR, 'camera_params.json')
+        if os.path.exists(params_path):
+            try:
+                with open(params_path, 'r') as f:
+                    data = json.load(f)
+                    self.camera_matrix = np.array(data['camera_matrix'])
+                    self.dist_coeffs = np.array(data['dist_coeff'])
+                    print(f"Loaded camera parameters from {params_path}")
+            except Exception as e:
+                print(f"Failed to load camera parameters: {e}")
         
         if self.camera:
             threading.Thread(target=self._capture_loop, daemon=True).start()
@@ -84,10 +102,30 @@ class VisionSystem:
                 aruco_viz = self.latest_frame.copy()
                 if ids is not None:
                     cv2.aruco.drawDetectedMarkers(aruco_viz, corners, ids)
-                    self.ros_node.latest_markers = [{"id": int(i[0])} for i in ids]
+                    markers = []
+                    for i, marker_id in enumerate(ids):
+                        marker_data = {"id": int(marker_id[0])}
+                        if self.camera_matrix is not None:
+                            # Estimate pose: returns rvecs, tvecs
+                            # Using estimatePoseSingleMarkers (found in some OpenCV versions)
+                            # or we can use cv2.solvePnP for better compatibility
+                            # but let's try the common ArUco one first
+                            rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+                                [corners[i]], MARKER_SIZE, self.camera_matrix, self.dist_coeffs
+                            )
+                            # tvec is [x, y, z]
+                            marker_data["distance"] = round(float(tvecs[0][0][2]), 3) # Z is distance
+                            marker_data["offset_x"] = round(float(tvecs[0][0][0]), 3) # X is horizontal offset
+                            
+                            # Draw coordinate axes for the marker
+                            cv2.drawFrameAxes(aruco_viz, self.camera_matrix, self.dist_coeffs, rvecs[0], tvecs[0], 0.05)
+                        
+                        markers.append(marker_data)
+                    self.ros_node.latest_markers = markers
                 else:
                     self.ros_node.latest_markers = []
-                self.ros_node.pub_markers.publish(String(data=json.dumps([m['id'] for m in self.ros_node.latest_markers])))
+                
+                self.ros_node.pub_markers.publish(String(data=json.dumps(self.ros_node.latest_markers)))
                 self.aruco_frame = aruco_viz
             time.sleep(0.01)
 

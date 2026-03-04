@@ -12,7 +12,8 @@
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo.svg') }}">
     <style>
         body {
-            padding-bottom: 70px;
+            padding-bottom: 110px;
+            /* Added padding to ensure content clear console bar */
             background-color: #f0f2f5;
             user-select: none;
             overscroll-behavior: none;
@@ -121,7 +122,7 @@
         /* Desktop Layout Overrides */
         @media (min-width: 993px) {
             body {
-                padding-bottom: 0;
+                padding-bottom: 40px;
             }
 
             .bottom-nav {
@@ -157,6 +158,84 @@
                 transition: right 0.3s ease;
                 display: flex;
                 flex-direction: column;
+            }
+
+            /* Pull-up Console Pane */
+            .console-pane {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 350px;
+                background: #1a1a1a;
+                border-top: 2px solid #333;
+                z-index: 1060;
+                transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                display: flex;
+                flex-direction: column;
+                color: #00ff41;
+                font-family: 'Courier New', Courier, monospace;
+                transform: translateY(calc(100% - 40px));
+                /* Only show 40px header when closed */
+            }
+
+            .console-pane.open {
+                transform: translateY(0);
+            }
+
+            .console-header {
+                height: 40px;
+                background: #252525;
+                display: flex;
+                align-items: center;
+                padding: 0 15px;
+                cursor: pointer;
+                justify-content: space-between;
+                border-bottom: 1px solid #333;
+                color: #ccc;
+            }
+
+            .console-header:hover {
+                background: #2a2a2a;
+            }
+
+            #system-log {
+                flex: 1;
+                padding: 10px;
+                overflow-y: auto;
+                font-size: 0.85rem;
+                background: #0d0d0d;
+                border-bottom: 1px solid #333;
+            }
+
+            /* Toast Container Auto-Adjust */
+            .toast-container {
+                bottom: 45px !important;
+                transition: bottom 0.3s ease;
+                z-index: 2000;
+            }
+
+            body.console-open .toast-container {
+                bottom: 355px !important;
+            }
+
+            @media (max-width: 992px) {
+                body {
+                    padding-bottom: 160px;
+                }
+
+                .console-pane {
+                    bottom: 70px;
+                    /* Above mobile nav */
+                }
+
+                .toast-container {
+                    bottom: 120px !important;
+                }
+
+                body.console-open .toast-container {
+                    bottom: 430px !important;
+                }
             }
 
             .vision-sidebar.open {
@@ -375,12 +454,41 @@
                 display: none;
             }
 
-            /* 2. Trashcan Overrides */
+            /* 2. Controls & Trashcan Overrides */
             .blocklyTrashcan {
-                bottom: 20px !important;
+                bottom: 85px !important;
                 right: 20px !important;
                 top: auto !important;
                 left: auto !important;
+            }
+
+            .blockly-controls {
+                top: auto !important;
+                bottom: 35px !important;
+                left: 15px !important;
+                right: auto !important;
+                width: auto !important;
+                display: flex !important;
+                gap: 10px !important;
+                pointer-events: none;
+            }
+
+            .blockly-controls button {
+                pointer-events: auto;
+                width: 44px;
+                height: 44px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 50% !important;
+                background: rgba(255, 255, 255, 0.95) !important;
+                backdrop-filter: blur(5px);
+                border: 1px solid #ddd !important;
+                padding: 0 !important;
+            }
+
+            .blockly-controls button span {
+                display: none;
             }
 
             /* 3. Blockly height adjustment for 2-row navbar */
@@ -432,9 +540,7 @@
             </div>
 
             <div class="navbar-status-text nav-batt d-flex align-items-center" id="batt-status-cont">
-                <i class="bi bi-battery-full me-1" style="font-size: 1.1rem;" id="batt-icon"></i>
-                <span id="batt-text">--%</span>
-                <button class="btn btn-outline-danger btn-sm ms-2 border-0 p-0 lh-1" onclick="confirmPoweroff()"
+                <button class="btn btn-outline-danger btn-sm border-0 p-0 lh-1" onclick="confirmPoweroff()"
                     title="Power Off">
                     <i class="bi bi-power" style="font-size: 1.2rem;"></i>
                 </button>
@@ -453,13 +559,17 @@
         <div class="desktop-split-container">
             <div id="view-blockly" class="view-section active">
                 <div class="blockly-controls">
-                    <button class="btn btn-sm btn-light border shadow-sm" onclick="saveWorkspace()"
-                        title="Save Workspace">
-                        <i class="bi bi-download"></i> Save
+                    <button class="btn btn-sm btn-light border shadow-sm d-none d-lg-flex" onclick="handleConsoleNav()"
+                        title="Toggle Console">
+                        <i class="bi bi-terminal me-lg-2"></i> <span>Console</span>
                     </button>
-                    <button class="btn btn-sm btn-light border shadow-sm" onclick="loadWorkspace()"
+                    <button class="btn btn-sm btn-light border shadow-sm d-flex" onclick="saveWorkspace()"
+                        title="Save Workspace">
+                        <i class="bi bi-download me-lg-2"></i> <span>Save</span>
+                    </button>
+                    <button class="btn btn-sm btn-light border shadow-sm d-flex" onclick="loadWorkspace()"
                         title="Load Workspace">
-                        <i class="bi bi-upload"></i> Load
+                        <i class="bi bi-upload me-lg-2"></i> <span>Load</span>
                     </button>
                 </div>
                 <div id="blocklyDiv"></div>
@@ -529,110 +639,102 @@
 
         <!-- Mobile Views (Hidden on Desktop) -->
         <div id="view-vision" class="view-section d-lg-none">
-            <h5 class="mb-3">Object Recognition</h5>
-            <div class="card bg-dark text-white overflow-hidden shadow-sm"
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="m-0">🤖 Vision Hub</h5>
+                <select class="form-select form-select-sm w-auto shadow-sm border-0 bg-white" id="vision-mode-select"
+                    onchange="setMobileVisionMode(this.value)">
+                    <option value="yolo">Environment</option>
+                    <option value="aruco">Markers</option>
+                    <option value="gesture">Gestures</option>
+                    <option value="calibration">Calibration</option>
+                </select>
+            </div>
+
+            <!-- Unified Camera Card -->
+            <div class="card bg-dark text-white overflow-hidden shadow-sm border-0 rounded-4"
                 style="width: 100%; aspect-ratio: 1 / 1; position: relative;">
-                <img id="yolo-feed" src="/video_feed/yolo" width="100%" height="100%"
+                <img id="mobile-feed" src="/video_feed/yolo" width="100%" height="100%"
                     style="object-fit: contain; background: #000;">
                 <div style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;">
-                    <div id="vision-status" class="badge bg-danger m-3">VISION: DISABLED</div>
+                    <div id="mobile-vision-status" class="badge bg-success m-3">ACTIVE: YOLO</div>
                 </div>
             </div>
-            <div class="mt-3">
-                <h6>Detected Objects</h6>
-                <div id="object-list" class="list-group shadow-sm">
-                    <div class="list-group-item text-muted small text-center italic">Scanning for objects...</div>
-                </div>
-            </div>
-        </div>
 
-        <div id="view-markers" class="view-section d-lg-none">
-            <h5 class="mb-3">ArUco Markers</h5>
-            <div class="card bg-dark text-white overflow-hidden shadow-sm"
-                style="width: 100%; aspect-ratio: 1 / 1; position: relative;">
-                <img id="aruco-feed" src="/video_feed/aruco" width="100%" height="100%"
-                    style="object-fit: contain; background: #000;">
-                <div style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;">
-                    <div id="marker-status" class="badge bg-secondary m-3">ARUCO: ACTIVE</div>
-                </div>
-            </div>
-            <div class="mt-3">
-                <h6>Detected Markers</h6>
-                <div id="marker-list" class="list-group shadow-sm">
-                    <div class="list-group-item text-muted small text-center italic">No markers focused...</div>
-                </div>
-            </div>
-        </div>
-
-        <div id="view-gestures" class="view-section d-lg-none">
-            <h5 class="mb-3">✋ Hand Gesture Control</h5>
-            <div class="card bg-dark text-white overflow-hidden shadow-sm"
-                style="width: 100%; aspect-ratio: 1 / 1; position: relative;">
-                <img id="gesture-feed" src="" width="100%" height="100%" style="object-fit: contain; background: #000;">
-                <div style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;">
-                    <div id="gesture-status" class="badge bg-secondary m-3">GESTURE: INACTIVE</div>
-                </div>
-            </div>
-            <div class="mt-3">
-                <h6>Detected Gesture</h6>
-                <div class="list-group shadow-sm">
-                    <div class="list-group-item d-flex justify-content-between align-items-center"
-                        id="gesture-label-item">
-                        <span id="gesture-label-text">👋 Waiting for hand...</span>
-                        <span class="badge bg-info rounded-pill" id="gesture-badge">–</span>
+            <!-- Contextual Data Displays -->
+            <div id="mobile-vision-data" class="mt-3">
+                <!-- YOLO Content -->
+                <div class="vision-sub-view" id="sub-vision-yolo">
+                    <h6 class="small text-muted fw-bold text-uppercase mb-2">Detected Objects</h6>
+                    <div id="object-list" class="list-group list-group-flush shadow-sm rounded-4 overflow-hidden">
+                        <div class="list-group-item text-muted small text-center py-3 italic">Scanning environment...
+                        </div>
                     </div>
                 </div>
-                <div class="mt-2 small text-muted">
-                    <b>Supported gestures:</b> ✊ Fist · ☝️ Point · ✌️ Peace · 🖐 Open · 🤙 Call
-                </div>
-            </div>
-        </div>
 
-        <div id="view-calibration" class="view-section d-lg-none">
-            <h5 class="mb-3">📷 Camera Calibration</h5>
-            <div class="card bg-dark text-white overflow-hidden shadow-sm"
-                style="width: 100%; aspect-ratio: 1 / 1; position: relative;">
-                <img id="calibration-feed" src="" width="100%" height="100%"
-                    style="object-fit: contain; background: #000;">
-                <div style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;">
-                    <div id="calibration-status-badge" class="badge bg-secondary m-3">CALIB: INACTIVE</div>
+                <!-- ArUco Content -->
+                <div class="vision-sub-view" id="sub-vision-aruco" style="display:none;">
+                    <h6 class="small text-muted fw-bold text-uppercase mb-2">Detected Markers</h6>
+                    <div id="marker-list" class="list-group list-group-flush shadow-sm rounded-4 overflow-hidden">
+                        <div class="list-group-item text-muted small text-center py-3 italic">Searching for markers...
+                        </div>
+                    </div>
                 </div>
-            </div>
-            <div class="mt-3">
-                <div class="d-flex gap-2 mb-3">
-                    <button class="btn btn-primary flex-grow-1" onclick="captureCalibSample()">
-                        <i class="bi bi-camera-fill"></i> Capture
-                    </button>
-                    <button class="btn btn-success" onclick="runCalibration()">
-                        <i class="bi bi-calculator"></i> Calibrate
-                    </button>
-                    <button class="btn btn-outline-danger" onclick="resetCalibration()">
-                        <i class="bi bi-trash"></i>
-                    </button>
+
+                <!-- Gesture Content -->
+                <div class="vision-sub-view" id="sub-vision-gesture" style="display:none;">
+                    <h6 class="small text-muted fw-bold text-uppercase mb-2">Gesture Detected</h6>
+                    <div class="list-group list-group-flush shadow-sm rounded-4 overflow-hidden">
+                        <div class="list-group-item d-flex justify-content-between align-items-center py-3"
+                            id="gesture-label-item">
+                            <span id="gesture-label-text" class="fw-bold text-primary">👋 Waiting for hand...</span>
+                            <span class="badge bg-primary rounded-pill" id="gesture-badge">–</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="card bg-white p-3 shadow-sm border-0 rounded-4">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <span class="fw-bold">Calibration Progress</span>
+
+                <!-- Calibration Content -->
+                <div class="vision-sub-view" id="sub-vision-calibration" style="display:none;">
+                    <div class="d-flex gap-2 mb-3">
+                        <button class="btn btn-primary flex-grow-1 shadow-sm" onclick="captureCalibSample()"><i
+                                class="bi bi-camera-fill"></i> Capture</button>
+                        <button class="btn btn-success shadow-sm" onclick="runCalibration()"><i
+                                class="bi bi-calculator"></i> Calibrate</button>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mt-2">
                         <span id="calib-count-text" class="badge bg-primary">0 Samples</span>
-                    </div>
-                    <div class="progress" style="height: 10px;">
-                        <div id="calib-progress-bar"
-                            class="progress-bar progress-bar-striped progress-bar-animated bg-success"
-                            role="progressbar" style="width: 0%"></div>
+                        <div class="progress flex-grow-1 ms-3" style="height: 6px;">
+                            <div id="calib-progress-bar" class="progress-bar bg-success" style="width: 0%"></div>
+                        </div>
                     </div>
                     <div class="mt-3 small border-top pt-2">
                         <p class="mb-1 text-primary fw-bold"><i class="bi bi-info-circle"></i> Instructions:</p>
-                        <ol class="ps-3 mb-0 text-muted">
-                            <li>Use a <b>10x7 square</b> checkerboard (yielding 9x6 internal corners).</li>
-                            <li>Move the board until it is fully detected (green dots appear).</li>
-                            <li><b>Capture</b> at least 10 samples from different distances and angles.</li>
-                            <li>Ensure the board covers the corners and edges of the frame.</li>
-                            <li>Click <b>Calibrate</b> to calculate and save camera parameters.</li>
-                        </ol>
+                        <ul class="ps-3 mb-0 text-muted" style="font-size: 0.8rem;">
+                            <li>Use a <b>10x7 checkerboard</b> (9x6 internal corners).</li>
+                            <li>Wait for <b>green dots</b> to appear on the squares.</li>
+                            <li>Take <b>10+ samples</b> from many distances and angles.</li>
+                            <li>Ensure square edges cover the <b>frame corners</b>.</li>
+                            <li>Click <b>Calibrate</b> to save camera parameters.</li>
+                        </ul>
                     </div>
                 </div>
             </div>
         </div>
+
+        <!-- Consolidated Console for Mobile (Full View) -->
+        <div id="view-console" class="view-section d-lg-none">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="m-0">🖥️ Mobile Console</h5>
+                <button class="btn btn-sm btn-outline-secondary"
+                    onclick="$('.log-container').empty().html('<div class=\'text-muted\'>Console cleared.</div>')">
+                    <i class="bi bi-trash"></i> Clear
+                </button>
+            </div>
+            <div class="log-container bg-dark text-success rounded-4 shadow-sm p-3 overflow-auto"
+                style="height: calc(100vh - 220px); font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; border: 1px solid #333;">
+                <div class="text-muted italic">Waiting for system output...</div>
+            </div>
+        </div>
+
 
     </div>
     </div>
@@ -641,17 +743,26 @@
         <div class="nav-item active" id="nav-blockly" onclick="changeView('blockly')">
             <i class="bi bi-puzzle nav-icon"></i><small>Code</small>
         </div>
-        <div class="nav-item disabled" id="nav-vision" onclick="changeView('vision')">
+        <div class="nav-item" id="nav-vision" onclick="changeView('vision')">
             <i class="bi bi-eye nav-icon"></i><small>Vision</small>
         </div>
-        <div class="nav-item disabled" id="nav-markers" onclick="changeView('markers')">
-            <i class="bi bi-upc-scan nav-icon"></i><small>Markers</small>
+        <div class="nav-item" id="nav-console" onclick="handleConsoleNav()">
+            <i class="bi bi-terminal nav-icon"></i><small>Console</small>
         </div>
-        <div class="nav-item disabled" id="nav-gestures" onclick="changeView('gestures')">
-            <i class="bi bi-hand-index-thumb nav-icon"></i><small>Gestures</small>
+    </div>
+
+    <!-- Pull-up Console Pane (Desktop View Only) -->
+    <div class="console-pane d-none d-lg-flex" id="desktop-console">
+        <div class="console-header" onclick="toggleConsole()">
+            <span><i class="bi bi-terminal me-2"></i> System Console</span>
+            <div class="d-flex gap-3">
+                <i class="bi bi-trash"
+                    onclick="event.stopPropagation(); $('.log-container').empty().html('<div class=\'text-muted\'>Console cleared.</div>')"></i>
+                <i class="bi bi-chevron-up" id="console-chevron"></i>
+            </div>
         </div>
-        <div class="nav-item disabled" id="nav-calibration" onclick="changeView('calibration')">
-            <i class="bi bi-camera nav-icon"></i><small>Calibration</small>
+        <div class="log-container p-3 overflow-auto flex-grow-1" id="desktop-log-view">
+            <div class="text-muted italic">Waiting for system output...</div>
         </div>
     </div>
 
@@ -716,6 +827,43 @@
                 });
             }
         }
+        function handleConsoleNav() {
+            if (window.innerWidth < 992) {
+                changeView('console');
+            } else {
+                toggleConsole();
+            }
+        }
+
+        function toggleConsole() {
+            const console = $('#desktop-console');
+            const icon = $('#console-chevron');
+            console.toggleClass('open');
+            $(document.body).toggleClass('console-open');
+
+            if (console.hasClass('open')) {
+                icon.removeClass('bi-chevron-up').addClass('bi-chevron-down');
+            } else {
+                icon.removeClass('bi-chevron-down').addClass('bi-chevron-up');
+            }
+        }
+
+        function setMobileVisionMode(mode) {
+            $('.vision-sub-view').hide();
+            $('#sub-vision-' + mode).show();
+
+            const feed = $('#mobile-feed');
+            const status = $('#mobile-vision-status');
+
+            feed.attr('src', '/video_feed/' + mode);
+            status.text('ACTIVE: ' + mode.toUpperCase());
+
+            if (mode === 'yolo') status.removeClass('bg-secondary bg-primary').addClass('bg-success');
+            else if (mode === 'aruco') status.removeClass('bg-success bg-primary').addClass('bg-secondary');
+            else if (mode === 'gesture') status.removeClass('bg-success bg-secondary').addClass('bg-primary');
+            else if (mode === 'calibration') status.removeClass('bg-success bg-secondary').addClass('bg-warning');
+        }
+
         function changeView(viewName) {
             if (isModeLocked) return;
 
@@ -728,25 +876,10 @@
             $('.view-section').removeClass('active'); $('#view-' + viewName).addClass('active');
             if (viewName === 'blockly') setTimeout(function () { window.dispatchEvent(new Event('resize')); }, 100);
 
-            // Update camera feeds based on active view
-            var yoloFeed = $('#yolo-feed');
-            var arucoFeed = $('#aruco-feed');
-            var gestureFeed = $('#gesture-feed');
-
-            yoloFeed.attr('src', '');
-            arucoFeed.attr('src', '');
-            gestureFeed.attr('src', '');
-
             if (viewName === 'vision') {
-                yoloFeed.attr('src', '/video_feed/yolo');
-            } else if (viewName === 'markers') {
-                arucoFeed.attr('src', '/video_feed/aruco');
-            } else if (viewName === 'gestures') {
-                gestureFeed.attr('src', '/video_feed/gesture');
-                $('#gesture-status').removeClass('bg-secondary').addClass('bg-success').text('GESTURE: ACTIVE');
-            } else if (viewName === 'calibration') {
-                $('#calibration-feed').attr('src', '/video_feed/calibration');
-                $('#calibration-status-badge').removeClass('bg-secondary').addClass('bg-success').text('CALIB: ACTIVE');
+                setMobileVisionMode($('#vision-mode-select').val());
+            } else {
+                $('#mobile-feed').attr('src', '');
             }
         }
 
@@ -767,14 +900,6 @@
                     text.text('No Link').css('color', '#dc3545');
                 }
 
-                var battText = $('#batt-text');
-                if (data.battery && data.battery.percent >= 0) {
-                    battText.text(data.battery.percent + '%');
-                    if (data.battery.percent < 20) battText.css('color', '#ffc107');
-                    else battText.css('color', '#28a745');
-                } else {
-                    battText.text('--%').css('color', '#6c757d');
-                }
 
                 serverCodeRunning = data.code_running;
 
@@ -815,7 +940,11 @@
                 if (data.markers && data.markers.length > 0) {
                     markerList.empty();
                     data.markers.forEach(function (m) {
-                        markerList.append(`<div class="list-group-item">🆔 Marker ID: <b>${m.id}</b></div>`);
+                        let text = `🆔 Marker ID: <b>${m.id}</b>`;
+                        if (m.distance !== undefined) {
+                            text += `<br><small class="text-primary">📏 Dist: ${m.distance}m | ↔️ Offset: ${m.offset_x}m</small>`;
+                        }
+                        markerList.append(`<div class="list-group-item">${text}</div>`);
                     });
                     $('#marker-status').removeClass('bg-secondary').addClass('bg-success').text('ARUCO: DETECTED');
                 } else {
@@ -844,15 +973,36 @@
                     showStatusToast(data.status_msg);
                 }
             }).fail(function () {
-                $('#telemetry-badge').removeClass('bg-success bg-secondary').addClass('bg-danger').text('Server Offline');
+                $('#tele-dot').removeClass('dot-green dot-gray').addClass('dot-red');
+                $('#tele-text').text('Srv Offline').css('color', '#dc3545');
             });
         }, 1000); // 1Hz poll for faster feedback
 
         function showStatusToast(message, type = "dark") {
+            // Unify Log output to all containers
+            const actualMsg = message.startsWith("LOG: ") ? message.substring(5) : message;
+            const logContainers = $('.log-container');
+
+            const logLine = $(`<div class="mb-1">
+                <span class="text-secondary small">[${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}]</span> ${actualMsg}
+            </div>`);
+
+            logContainers.each(function () {
+                const el = $(this);
+                const isAtBottom = el[0].scrollHeight - el.scrollTop() <= el.outerHeight() + 20;
+
+                el.append(logLine.clone());
+                if (el.find('div').length > 150) el.find('div').first().remove();
+                if (isAtBottom) el.scrollTop(el[0].scrollHeight);
+                el.find('.text-muted').remove();
+            });
+
+            if (message.startsWith("LOG: ")) return; // No toast for logs
+
+            // Regular Toast for status updates
             var icon = type === "success" ? "✅" : "⚠️";
             var bgClass = type === "success" ? "bg-success" : "bg-dark";
 
-            // Create toast element
             var toastHtml = `
             <div class="toast-container position-fixed bottom-0 start-50 translate-middle-x p-3">
                 <div class="toast align-items-center text-white ${bgClass} border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true">
@@ -978,7 +1128,7 @@
             };
 
             Blockly.Blocks['ugv_wait'] = { init: function () { this.appendDummyInput().appendField("⏳ Wait (s)").appendField(new Blockly.FieldNumber(1), "SEC"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(210); } };
-            python.pythonGenerator.forBlock['ugv_wait'] = function (block) { return 'time.sleep(' + block.getFieldValue('SEC') + ')\n'; };
+            python.pythonGenerator.forBlock['ugv_wait'] = function (block) { return 'robot.wait(' + block.getFieldValue('SEC') + ')\n'; };
 
             Blockly.Blocks['ugv_stop'] = { init: function () { this.appendDummyInput().appendField("🛑 STOP"); this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(350); } };
             python.pythonGenerator.forBlock['ugv_stop'] = function (block) { return 'robot.stop()\n'; };
@@ -1071,6 +1221,87 @@
                 return ['robot.sees_marker(' + id + ')', python.pythonGenerator.ORDER_ATOMIC];
             };
 
+            Blockly.Blocks['ugv_marker_distance'] = {
+                init: function () {
+                    this.appendValueInput("MARKER_ID")
+                        .setCheck("Number")
+                        .appendField("📏 Marker Distance (ID)");
+                    this.setOutput(true, "Number");
+                    this.setColour(290);
+                }
+            };
+            python.pythonGenerator.forBlock['ugv_marker_distance'] = function (block) {
+                var id = python.pythonGenerator.valueToCode(block, 'MARKER_ID', python.pythonGenerator.ORDER_ATOMIC) || '0';
+                return ['robot.get_marker_distance(' + id + ')', python.pythonGenerator.ORDER_ATOMIC];
+            };
+
+            Blockly.Blocks['ugv_marker_offset'] = {
+                init: function () {
+                    this.appendValueInput("MARKER_ID")
+                        .setCheck("Number")
+                        .appendField("↔️ Marker Offset X (ID)");
+                    this.setOutput(true, "Number");
+                    this.setColour(290);
+                }
+            };
+            python.pythonGenerator.forBlock['ugv_marker_offset'] = function (block) {
+                var id = python.pythonGenerator.valueToCode(block, 'MARKER_ID', python.pythonGenerator.ORDER_ATOMIC) || '0';
+                return ['robot.get_marker_offset(' + id + ')', python.pythonGenerator.ORDER_ATOMIC];
+            };
+
+            Blockly.Blocks['ugv_follow_marker'] = {
+                init: function () {
+                    this.appendDummyInput().appendField("🚀 Follow Marker");
+                    this.appendValueInput("MARKER_ID").setCheck("Number").appendField("ID:");
+                    this.appendValueInput("DIST").setCheck("Number").appendField("Target Dist (m):");
+                    this.appendValueInput("DEADZONE").setCheck("Number").appendField("Deadzone (m):");
+                    this.appendValueInput("SPEED").setCheck("Number").appendField("Speed:");
+                    this.setPreviousStatement(true);
+                    this.setNextStatement(true);
+                    this.setColour(160);
+                    this.setTooltip("Automatically move to maintain a specific distance from a marker");
+                }
+            };
+            python.pythonGenerator.forBlock['ugv_follow_marker'] = function (block) {
+                var id = python.pythonGenerator.valueToCode(block, 'MARKER_ID', python.pythonGenerator.ORDER_ATOMIC) || '0';
+                var dist = python.pythonGenerator.valueToCode(block, 'DIST', python.pythonGenerator.ORDER_ATOMIC) || '1.0';
+                var dz = python.pythonGenerator.valueToCode(block, 'DEADZONE', python.pythonGenerator.ORDER_ATOMIC) || '0.1';
+                var speed = python.pythonGenerator.valueToCode(block, 'SPEED', python.pythonGenerator.ORDER_ATOMIC) || '50';
+                return `robot.follow_marker(${id}, ${dist}, ${dz}, ${speed})\n`;
+            };
+
+            Blockly.Blocks['ugv_heading_lock'] = {
+                init: function () {
+                    this.appendDummyInput()
+                        .appendField("🧭 Heading Lock")
+                        .appendField(new Blockly.FieldDropdown([["ON", "True"], ["OFF", "False"]]), "STATE");
+                    this.setPreviousStatement(true);
+                    this.setNextStatement(true);
+                    this.setColour(180);
+                    this.setTooltip("Enable or disable automatic straight-path correction");
+                }
+            };
+            python.pythonGenerator.forBlock['ugv_heading_lock'] = function (block) {
+                var state = block.getFieldValue('STATE');
+                return `robot.set_heading_lock(${state})\n`;
+            };
+
+            Blockly.Blocks['ugv_log'] = {
+                init: function () {
+                    this.appendValueInput("TEXT")
+                        .setCheck(null)
+                        .appendField("📝 Log");
+                    this.setPreviousStatement(true);
+                    this.setNextStatement(true);
+                    this.setColour(160);
+                    this.setTooltip("Print a message to the system console");
+                }
+            };
+            python.pythonGenerator.forBlock['ugv_log'] = function (block) {
+                var text = python.pythonGenerator.valueToCode(block, 'TEXT', python.pythonGenerator.ORDER_ATOMIC) || '""';
+                return `print(${text})\n`;
+            };
+
             Blockly.Blocks['ugv_sees_gesture'] = {
                 init: function () {
                     this.appendDummyInput()
@@ -1116,6 +1347,7 @@
                             <value name="Z"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
                             <value name="R"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
                         </block>
+                        <block type="ugv_heading_lock"></block>
                     </category>
                     <category name="Vision" colour="290">
                         <block type="ugv_sees_object"></block>
@@ -1132,6 +1364,26 @@
                                     <field name="NUM">1</field>
                                 </shadow>
                             </value>
+                        </block>
+                        <block type="ugv_marker_distance">
+                            <value name="MARKER_ID">
+                                <shadow type="math_number">
+                                    <field name="NUM">1</field>
+                                </shadow>
+                            </value>
+                        </block>
+                        <block type="ugv_marker_offset">
+                            <value name="MARKER_ID">
+                                <shadow type="math_number">
+                                    <field name="NUM">1</field>
+                                </shadow>
+                            </value>
+                        </block>
+                        <block type="ugv_follow_marker">
+                            <value name="MARKER_ID"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+                            <value name="DIST"><shadow type="math_number"><field name="NUM">1.0</field></shadow></value>
+                            <value name="DEADZONE"><shadow type="math_number"><field name="NUM">0.1</field></shadow></value>
+                            <value name="SPEED"><shadow type="math_number"><field name="NUM">50</field></shadow></value>
                         </block>
                         <block type="ugv_sees_gesture"></block>
                     </category>
@@ -1172,8 +1424,12 @@
                     </category>
                     <category name="Text" colour="160">
                         <block type="text"></block>
+                        <block type="text_join"></block>
+                        <block type="text_print"></block>
                     </category>
-                    <category name="Variables" colour="330" custom="VARIABLE"></category>
+                    <category name="Variables" colour="330" custom="VARIABLE">
+                        <block type="ugv_log"></block>
+                    </category>
                     <category name="Functions" colour="290" custom="PROCEDURE"></category>
                 </xml>`,
                 zoom: { controls: !isMobile, wheel: true, startScale: isMobile ? 0.7 : 1.0, maxScale: 3, minScale: 0.3 },
